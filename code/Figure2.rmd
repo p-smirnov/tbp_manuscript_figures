@@ -1,0 +1,404 @@
+---
+title: "Figure 2"
+output: html_notebook
+---
+
+
+```{r}
+library(Matrix)
+library(igraph)
+library(data.table)
+library(doParallel)
+
+
+
+allSig <- fread("~/Code/tissue_biomarker/biomarker_res/allSigBio.csv")
+gene_info <- fread("~/Code/tissue_biomarker/geneInfo.csv")
+
+gene_info[, V1 := gsub(V1, pat = "\\.[0-9]+$", rep = "")]
+
+gene_symbol <- gene_info[, .(V1, gene_name)]
+
+colnames(gene_symbol)[1] <- "Gene"
+
+drugTargetInfo <- fread("~/Code/Github/pachyderm/Annotations/DrugTargetCompilation_updated.csv")
+
+
+drugTargetInfo <- drugTargetInfo[BHKLAB.DRUGID %in% allSig$Drug]
+
+drugTargetInfo <- drugTargetInfo[, .("TARGET" = unique(TARGET_NAME)), BHKLAB.DRUGID]
+
+drugTargetInfo <- drugTargetInfo[complete.cases(drugTargetInfo), ]
+
+drugTargetInfo <- drugTargetInfo[drugTargetInfo$TARGET %in% gene_info$gene_name, ]
+
+drugTargetInfo[, TARGET := gene_info$V1[match(TARGET, gene_info$gene_name)]]
+
+```
+
+# 2a
+
+Loading in Reactome Pathway and creating a network.
+ 
+```{r}
+
+reactomeBottom <- fread("~/Code/tissue_biomarker/pathways/ReactomeBottom.txt")
+reactomeBottom <- reactomeBottom[V6 == "Homo sapiens"]
+reactomeBottom <- reactomeBottom[grepl(x = V1, pat = "ENSG")]
+
+
+reactomeGenes <- unique(reactomeBottom[[1]])
+
+
+reactomeMatrix <- matrix(0, nrow = length(reactomeGenes), ncol = length(reactomeGenes))
+
+colnames(reactomeMatrix) <- rownames(reactomeMatrix) <- reactomeGenes
+
+
+reactomeBottomPathways <- split(reactomeBottom, by = "V4")
+
+
+for (pathway in reactomeBottomPathways) {
+    reactomeMatrix[pathway[[1]], pathway[[1]]] <- 1
+}
+
+reactomeGraph <- graph_from_adjacency_matrix(reactomeMatrix, weighted = "1", mode = "undirected")
+
+
+```
+
+I think 3 comparisons are in order: Target to random gene, Random Gene to Biomarker, and Random Gene to Random
+
+First, lets identify the distances between markers and targets.
+
+```{r}
+reactomeDist <- distances(reactomeGraph)
+
+
+distance.list <- list()
+
+for (drug in drugTargetInfo[, unique(BHKLAB.DRUGID)]) {
+    targets <- drugTargetInfo[BHKLAB.DRUGID == drug, TARGET]
+
+    markers <- allSig[Drug == drug, Gene]
+
+    tg <- unique(na.omit(match(targets, colnames(reactomeMatrix))))
+
+    mk <- unique(na.omit(match(markers, colnames(reactomeMatrix))))
+
+
+    distance.list[[drug]] <- reactomeDist[tg, mk, drop = FALSE]
+}
+
+
+```
+
+
+Now lets generate the backgrounds:
+
+```{r}
+
+
+registerDoParallel(10)
+
+tg_random <- sample(length(vertex.attributes(reactomeGraph)$name), 100)
+mk_random <- sample(length(vertex.attributes(reactomeGraph)$name), 100)
+
+all_dists <- foreach(tg = tg_random, .combine = rbind) %dopar% {
+    distances(reactomeGraph, tg, mk_random)
+}
+
+all_to_targets <- reactomeDist[unique(na.omit(match(drugTargetInfo$TARGET, colnames(reactomeMatrix)))), ]
+
+
+```
+
+Lets Plot. 
+
+```{r}
+
+all_dists.m <- reactomeDist[upper.tri(reactomeDist, diag = TRUE)]
+all_to_targets.m <- data.table(reshape2::melt(all_to_targets))
+
+distance.list.m <- rbindlist(lapply(distance.list, reshape2::melt))
+
+
+library(ggplot2)
+
+toPlot <- data.frame(
+    Cat = c(
+        rep("All", times = length(all_dists.m)),
+        rep("Marker to Target", times = length(distance.list.m[[3]])),
+        rep("All to Target", times = length(all_to_targets.m[[3]]))
+    ),
+    "Distance" = c(all_dists.m, distance.list.m[[3]], all_to_targets.m[[3]])
+)
+
+
+
+toPlot <- data.table(toPlot)
+
+toPlot[, weight := 1 / .N, Cat]
+
+
+pdf("figures/reactomeNetworkDistanceDist.pdf", height = 4, width = 3)
+ggplot(toPlot, aes(x = Distance, weight = weight)) +
+    geom_bar() +
+    facet_grid(rows = vars(Cat)) +
+    theme_bw() +
+    theme(legend.position = "None")
+dev.off()
+
+# ggplot(toPlot, aes(x = Distance, fill = Cat, weight = weight)) +
+#     geom_bar() +
+#     facet_grid(rows = vars(Cat)) +
+#     theme_bw()
+
+
+
+
+```
+
+Lets print out the statistics as well:
+
+
+```{r}
+mean(reactomeDist[is.finite(reactomeDist)])
+
+my.split <- split(toPlot$Distance, f = toPlot$Cat)
+
+wilcox.test(sample(my.split[["All"]][is.finite(my.split[["All"]])], 10000),
+            my.split[["All to Target"]][is.finite(my.split[["All to Target"]])])
+
+
+wilcox.test(
+    my.split[["Marker to Target"]][is.finite(my.split[["Marker to Target"]])],
+    my.split[["All to Target"]][is.finite(my.split[["All to Target"]])]
+)
+
+```
+
+# 2b
+
+
+```{r}
+
+
+allSig <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/allSigBio.csv")
+allRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/meta_res_pharmacodb.csv")
+allSig <- allRes[BF_p_all < 0.05]
+
+gene_info <- fread("~/Code/tissue_biomarker/geneInfo.csv")
+
+
+allSig[, Is_Target := "No"]
+
+
+
+allSig[!Drug %in% drugTargetInfo$BHKLAB.DRUGID, Is_Target := "No Target Info"]
+
+allSig[, Target_Pathway_Distance := ifelse(Gene %in% colnames(distance.list[[Drug]]), min(distance.list[[Drug]][, Gene]), NA_real_), .(Drug, Gene)]
+
+allSig[drugTargetInfo, Is_Target := "Yes", on = c("Drug" = "BHKLAB.DRUGID", Gene = "TARGET")]
+
+pdf("figures/abs_estimate_vs_distance_to_target.pdf", height = 3, width = 4)
+ggplot(allSig, 
+	aes(factor(Target_Pathway_Distance, exclude=c(NA_real_,Inf)), y=abs(estimate)))+geom_boxplot() + 
+theme_bw()+  xlab("Distance to Drug Target") + ylab("Absolute Correlation\nwith Drug Response")
+dev.off()
+
+toTest <- copy(allSig)
+
+toTest$Target_Pathway_Distance <- factor(toTest$Target_Pathway_Distance, exclude = c(NA_real_, Inf))
+toTest$estimate <- abs(toTest$estimate)
+
+kruskal.test(estimate ~ Target_Pathway_Distance, toTest)
+
+wilcox.test(toTest[Target_Pathway_Distance == 0,estimate], toTest[Target_Pathway_Distance!=0, estimate])
+wilcox.test(toTest[Target_Pathway_Distance == 5, estimate], toTest[Target_Pathway_Distance != 5, estimate])
+
+
+```
+
+
+# 2c
+
+Loading results from CRISPR and RNAi
+
+```{r}
+
+
+crispr.res <- readRDS("~/Code/tissue_biomarker/depmap/crispr_biomarker_res.rds")
+rnai.res <- readRDS("~/Code/tissue_biomarker/depmap/rnai_biomarker_res.rds")
+
+crispr.cor.with.target <- sapply(crispr.res, function(x) apply(x[, , "significant", drop = F], 1, any, na.rm = T))
+
+
+crispr.cor.with.target <- lapply(names(crispr.cor.with.target), function(nm) {
+    xx <- strsplit(nm, split = "_")[[1]]
+
+    tissue <- xx[1]
+    drug <- xx[2]
+
+    data.frame(
+        Tissue = tissue, Drug = drug, Gene = names(crispr.cor.with.target[[nm]]),
+        status = crispr.cor.with.target[[nm]]
+    )
+})
+
+
+crispr.cor.with.target <- rbindlist(crispr.cor.with.target)
+
+
+
+rnai.cor.with.target <- sapply(rnai.res, function(x) apply(x[, , "significant", drop = F], 1, any, na.rm = T))
+
+
+rnai.cor.with.target <- lapply(names(rnai.cor.with.target), function(nm) {
+    xx <- strsplit(nm, split = "_")[[1]]
+
+    tissue <- xx[1]
+    drug <- xx[2]
+
+    data.frame(
+        Tissue = tissue, Drug = drug, Gene = names(rnai.cor.with.target[[nm]]),
+        status = rnai.cor.with.target[[nm]]
+    )
+})
+
+
+rnai.cor.with.target <- rbindlist(rnai.cor.with.target)
+
+rnai.cor.with.target[, Gene := gsub(pat = "\\.[0-9]+", rep = "", x = Gene)]
+crispr.cor.with.target[, Gene := gsub(pat = "\\.[0-9]+", rep = "", x = Gene)]
+
+
+
+
+rnai.merged <- allRes[rnai.cor.with.target, , on = .(Tissue, Drug, Gene)]
+
+
+allSig[, RNAi := "Not Associated"]
+allSig[, CRISPR := "Not Associated"]
+
+allSig[rnai.cor.with.target[(status)], RNAi := "Associated\nwith RNAi", on = .(Drug, Gene, Tissue)]
+allSig[crispr.cor.with.target[(status)], CRISPR := "Associated\nwith CRISPR", on = .(Drug, Gene, Tissue)]
+
+prop.table(table(allSig$RNAi))
+prop.table(table(allSig$CRISPR))
+
+```
+
+
+```{r}
+
+
+pdf("figures/RNAi_distance_to_target_analysis.pdf", height = 3, width = 3)
+ggplot(
+    allSig[allSig[, .(weight = 1 / .N), .(RNAi)], , on = .(RNAi)],
+    aes(Target_Pathway_Distance, weight = weight)
+) +
+    geom_bar() +
+    facet_grid(RNAi ~ .) +
+    theme_bw() +
+    xlab("Distance to Drug Target") +
+    ylab("Propotion of Biomarkers")
+dev.off()
+ggplot(
+    allSig[allSig[, .(weight = 1 / .N), .(RNAi)], , on = .(RNAi)],
+    aes(Target_Pathway_Distance, weight = weight)
+) +
+    geom_bar() +
+    facet_grid(RNAi ~ .) +
+    theme_bw() +
+    xlab("Distance to Drug Target") +
+    ylab("Propotion of Biomarkers")
+
+
+pdf("figures/CRISPR_distance_to_target_analysis.pdf", height = 3, width = 3)
+ggplot(
+    allSig[allSig[, .(weight = 1 / .N), .(CRISPR)], , on = .(CRISPR)],
+    aes(Target_Pathway_Distance, weight = weight)
+) +
+    geom_bar() +
+    facet_grid(CRISPR ~ .) +
+    theme_bw() +
+    xlab("Distance to Drug Target") +
+    ylab("Propotion of Biomarkers")
+dev.off()
+ggplot(
+    allSig[allSig[, .(weight = 1 / .N), .(CRISPR)], , on = .(CRISPR)],
+    aes(Target_Pathway_Distance, weight = weight)
+) +
+    geom_bar() +
+    facet_grid(CRISPR ~ .) +
+    theme_bw() +
+    xlab("Distance to Drug Target") +
+    ylab("Propotion of Biomarkers")
+
+wilcox.test(
+    allSig[CRISPR %in% "Associated\nwith CRISPR", Target_Pathway_Distance],
+    allSig[CRISPR %in% "Not Associated", Target_Pathway_Distance]
+)
+
+
+
+wilcox.test(
+    allSig[RNAi %in% "Associated\nwith RNAi", Target_Pathway_Distance],
+    allSig[RNAi %in% "Not Associated", Target_Pathway_Distance]
+)
+
+
+```
+
+
+# 2d
+
+```{r}
+
+
+
+pdf("figures/CRISPR_boxplot_effect_size.pdf", height = 3, width = 3)
+ggplot(
+    allSig,
+    aes(CRISPR, abs(estimate))
+) +
+    geom_boxplot() +
+    theme_bw() +
+    xlab("") +
+    ylab("Absolute Correlation\nwith Drug Response")
+dev.off()
+ggplot(
+    allSig,
+    aes(CRISPR, abs(estimate))
+) +
+    geom_boxplot() +
+    theme_bw() +
+    xlab("") +
+    ylab("Absolute Correlation\nwith Drug Response")
+
+pdf("figures/RNAi_boxplot_effect_size.pdf", height = 3, width = 3)
+ggplot(
+    allSig,
+    aes(RNAi, abs(estimate))
+) +
+    geom_boxplot() +
+    theme_bw() +
+    xlab("") +
+    ylab("Absolute Correlation\nwith Drug Response")
+dev.off()
+ggplot(
+    allSig,
+    aes(RNAi, abs(estimate))
+) +
+    geom_boxplot() +
+    theme_bw() +
+    xlab("") +
+    ylab("Absolute Correlation\nwith Drug Response")
+
+wilcox.test(split(allSig[, abs(estimate)], allSig$RNAi)[[1]], split(allSig[, abs(estimate)], allSig$RNAi)[[2]])
+
+wilcox.test(split(allSig[, abs(estimate)], allSig$CRISPR)[[1]], split(allSig[, abs(estimate)], allSig$CRISPR)[[2]])
+
+
+```

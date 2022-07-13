@@ -1,0 +1,292 @@
+---
+title: "Supplementary Figure 3"
+output: html_notebook
+---
+
+```{r}
+library(PharmacoGx)
+library(PRROC)
+library(ggplot2)
+library(data.table)
+
+
+biomarker.res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/meta_res_pharmacodb.csv")
+
+toRunByGene <- fread("~/Code/tissue_biomarker/rnaResults/runlist_files/toRunMetaByGene.txt")
+
+colnames(toRunByGene) <- c("Gene", "Tissue", "Drug", "PSet", "Sig")
+
+
+
+```
+
+
+
+# Comparison to Other Gene Spaces
+
+## First, we will look at whether any of these gene spaces enrich for genes replicating in 
+
+Here, we want to see whether any of the commonly used gene spaces are enriched for genes that validate in meta-analysis. 
+
+### Cancer Gene Census 
+
+
+
+```{r}
+library(data.table)
+library(piano)
+
+
+cgc.all <- fread("~/Code/tissue_biomarker/cancerGeneCensus/cgc.genes.csv")
+
+
+cgc.table <- biomarker.res[,table("CGC"=Gene%in%cgc.all$Ensembl.id, "Pass Meta"=BF_p_all<0.05)]
+
+fisher.test(cgc.table)
+
+
+```
+
+
+### Hallmarks
+
+```{r}
+hallmarks <- loadGSC("~/Code/tissue_biomarker/pathways/h.all.v7.5.1.symbols.gmt")
+
+hallmark.symbols <- unique(unlist(hallmarks$gsc))
+
+gene.info <- fread("~/Code/tissue_biomarker/geneInfo.csv")
+
+hallmark <- na.omit(gsub(pat="\\.[0-9]+$",rep="", gene.info$gene_id[match(hallmark.symbols, gene.info$gene_name)]))
+
+hallmark.table <- biomarker.res[,table("Hallmark"=Gene%in%hallmark, "Pass Meta"=BF_p_all<0.05)]
+
+fisher.test(hallmark.table)
+
+```
+
+### Cancer Functional Events
+
+
+```{r}
+library(readxl)
+
+cfes.all <- read_excel("~/Code/tissue_biomarker/CancerFunctionalEvents/mmc3.xlsx", skip = 2)
+cfes.symbol <- unique(cfes.all$Gene)
+
+cfes <- na.omit(gsub(pat="\\.[0-9]+$",rep="", gene.info$gene_id[match(cfes.symbol, gene.info$gene_name)]))
+
+
+cfes.table <- biomarker.res[,table("CFE"=Gene%in%cfes, "Pass Meta"=BF_p_all<0.05)]
+
+fisher.test(cfes.table)
+
+```
+
+## We also look for overlap enrichment between significant biomarkers at the gene spaces
+
+### Cancer Gene Census
+
+```{r}
+library(piano)
+
+sig.gene <- unique(biomarker.res[BF_p_all<0.05, Gene])
+gene.info$ensg_clean <- gsub("\\.[0-9]+$", rep="", x=gene.info$gene_id)
+
+universe.of.genes <- unique(toRunByGene$Gene)
+universe.of.genes <- intersect(universe.of.genes, gene.info$ensg_clean[gene.info$gene_type%in%"protein_coding"])
+
+allsig.cgc.table <- table("CGC"=unique(toRunByGene$Gene)%in%cgc.all$Ensembl.id, "Signficant"=unique(toRunByGene$Gene)%in%sig.gene )
+fisher.test(allsig.cgc.table)
+```
+
+
+### Hallmark
+
+```{r}
+
+
+allsig.hallmark.table <- table("Hallmark"=universe.of.genes%in%hallmark, "Signficant"=universe.of.genes%in%sig.gene )
+fisher.test(allsig.hallmark.table)
+allsig.hallmark.table
+```
+
+
+
+### CFE
+
+```{r}
+
+
+allsig.cfes.table <- table("CFEs"=universe.of.genes%in%cfes, "Signficant"=universe.of.genes%in%sig.gene )
+fisher.test(allsig.cfes.table)
+allsig.cfes.table
+# fisher.test(allsig.cfes.table)$estimate
+```
+
+TODO: Visualization Idea: Heatmap??
+
+
+## Heatmap
+
+
+
+```{r}
+library(pheatmap)
+
+pred.sig.vs.all <- c("CGC"=fisher.test(allsig.cgc.table)$estimate[[1]],
+                     "Hallmark"=fisher.test(allsig.hallmark.table)$estimate[[1]],
+                     "CFEs"=fisher.test(allsig.cfes.table)$estimate[[1]])
+
+
+pred.meta.pass <- c("CGC"=fisher.test(cgc.table)$estimate[[1]],
+                     "Hallmark"=fisher.test(hallmark.table)$estimate[[1]],
+                     "CFEs"=fisher.test(cfes.table)$estimate[[1]])
+
+toPlot <- data.matrix(rbind("Significant\nBiomarker"=pred.sig.vs.all, "Pass\nMeta-Analysis"=pred.meta.pass))
+
+pheatmap(toPlot, scale = "none", cluster_rows = F, cluster_cols = F, angle_col = 0)
+
+
+```
+
+```{r}
+
+
+getFisherRes <- function(table, name) {
+    return(data.frame(
+        Geneset = name,
+        "Odds Ratio" = fisher.test(table)$estimate[[1]],
+        "Lower" = fisher.test(table)$conf.int[1],
+        "Upper" = fisher.test(table)$conf.int[2],
+        p.val = format(fisher.test(table)$p.val[[1]], scientific=T),
+        check.names = FALSE
+    ))
+}
+
+toPlot <- rbindlist(list(getFisherRes(allsig.cgc.table, "CGC"),
+               getFisherRes(allsig.cfes.table, "CFEs"),
+               getFisherRes(allsig.hallmark.table, "Hallmark")))
+
+
+p <- ggplot(toPlot, aes(x = `Odds Ratio`, y = Geneset, xmin = Lower, xmax = Upper, label = p.val)) +
+    geom_errorbarh(height = 0.15, show.legend = FALSE) +
+    geom_point() +
+    geom_vline(xintercept = 1, linetype = 2, show.legend = FALSE) +
+    coord_cartesian(clip = "off") +
+    theme_bw() +
+    geom_text(aes(x = Inf, y = Geneset), nudge_x = 0.0, size = 4, hjust = "outward", show.legend = FALSE) + # scale_y_discrete(breaks=dd$y)  +
+    theme(plot.margin = unit(c(1, 8, 1, 1), "lines"), legend.position = "bottom")
+
+print(p)
+
+pdf("figures/significantOddsRatioPlot.pdf", height=5, width=6)
+print(p)
+dev.off()
+
+```
+
+
+```{r}
+
+
+getFisherRes <- function(table, name) {
+    return(data.frame(
+        Geneset = name,
+        "Odds Ratio" = fisher.test(table)$estimate[[1]],
+        "Lower" = fisher.test(table)$conf.int[1],
+        "Upper" = fisher.test(table)$conf.int[2],
+        p.val = format(fisher.test(table)$p.val[[1]], scientific=T),
+        check.names = FALSE
+    ))
+}
+
+toPlot <- rbindlist(list(getFisherRes(cgc.table, "CGC"),
+               getFisherRes(cfes.table, "CFEs"),
+               getFisherRes(hallmark.table, "Hallmark")))
+
+
+p <- ggplot(toPlot, aes(x = `Odds Ratio`, y = Geneset, xmin = Lower, xmax = Upper, label = p.val)) +
+    geom_errorbarh(height = 0.15, show.legend = FALSE) +
+    geom_point() +
+    geom_vline(xintercept = 1, linetype = 2, show.legend = FALSE) +
+    coord_cartesian(clip = "off") +
+    theme_bw() +
+    geom_text(aes(x = Inf, y = Geneset), nudge_x = 0.0, size = 4, hjust = "outward", show.legend = FALSE) + # scale_y_discrete(breaks=dd$y)  +
+    theme(plot.margin = unit(c(1, 8, 1, 1), "lines"), legend.position = "bottom")
+
+print(p)
+
+pdf("figures/metaPassOddsRatioPlot.pdf", height=5, width=6)
+print(p)
+dev.off()
+
+```
+
+
+
+
+## Barplots
+I think this will look better in barplots
+```{r}
+
+pass.meta.genenum <- list(CGC=cgc.table, Hallmark=hallmark.table, "CFE"=cfes.table)
+
+pass.meta.genenum <- lapply(pass.meta.genenum, reshape2::melt)
+
+pass.meta.toPlot <- rbindlist(pass.meta.genenum, idcol = "Database", use.names=FALSE)
+
+colnames(pass.meta.toPlot)[2] <- "In Gene List"
+colnames(pass.meta.toPlot)[4] <- "Proportion of Genes"
+colnames(pass.meta.toPlot)[3] = "Pass Meta-Analysis"
+
+
+ggplot(pass.meta.toPlot, aes(x=`In Gene List`, y=`Proportion of Genes`, fill=`Pass Meta-Analysis`)) + geom_col(position = "fill") + facet_grid(~Database) + theme_bw() #+ theme(panel.grid.major.x = element_blank())
+
+```
+
+
+```{r}
+
+pass.sig.genenum <- list(CGC=allsig.cgc.table, Hallmark=allsig.hallmark.table, "CFE"=allsig.cfes.table)
+
+pass.sig.genenum <- lapply(pass.sig.genenum, reshape2::melt)
+
+pass.sig.toPlot <- rbindlist(pass.sig.genenum, idcol = "Database", use.names=FALSE)
+
+colnames(pass.sig.toPlot)[2] <- "In Gene List"
+colnames(pass.sig.toPlot)[4] <- "Proportion of Genes"
+
+
+ggplot(pass.sig.toPlot, aes(x=`In Gene List`, y=`Proportion of Genes`, fill=`Signficant`)) + geom_col(position = "fill") + facet_grid(~Database)+ theme_bw() + theme(panel.grid.major.x = element_blank())
+
+
+
+```
+
+### ORA analysis for Hallmarks
+
+This isn't necessarily important, but for completeness and curiosity we take a look at whether any of the hallmark genesets are enriched in the biomarkers.
+
+
+```{r}
+library(fgsea)
+library(ggrepel)
+
+
+sig.gene.symbol <- na.omit(gene.info$gene_name[match(sig.gene, gene.info$ensg_clean)])
+all.gene.symbol <- unique(na.omit(gene.info$gene_name[match(universe.of.genes, gene.info$ensg_clean)]))
+
+
+hallmark.ora <- fora(pathways = hallmarks$gsc, genes = sig.gene.symbol, universe = all.gene.symbol)
+
+hallmark.ora[,pfer := p.adjust(pval, method="bonf")]
+
+# pdf("hallmark_enrichment_in_significant_genes.pdf", width=10)
+ggplot(hallmark.ora, aes(overlap/size*100, -log10(pval))) + geom_point() + xlab("Percent Geneset as Significant Markers") + ylab("-log10(Fisher Test p-Value)") + geom_hline(yintercept = -log10(0.05/nrow(hallmark.ora))) + theme_bw()  + geom_text_repel(data=hallmark.ora[pfer<0.05], aes(label=pathway), show.legend = F)
+# dev.off()
+
+```
+
+
+

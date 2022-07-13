@@ -1,0 +1,247 @@
+---
+title: "Ovarian Validation of Paclitaxel markers."
+output:
+  html_document:
+    df_print: paged
+---
+
+# Ovarian + Taxol
+
+This should be fairly simple, there are 2 datasets, and only 1 marker.
+
+```{r}
+
+
+library(PharmacoGx)
+library(survcomp)
+library(survminer)
+library(readxl)
+library(ggplot2)
+library(qs)
+
+library(data.table)
+
+
+
+biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+biomarker_res <- biomarker_res[FWER_genes <= 0.05]
+
+biomarker_res[Tissue=="Ovary/Fallopian Tube"]
+
+geneToCorrelate <- biomarker_res[Tissue=="Ovary/Fallopian Tube"&Drug=="Paclitaxel", Gene]
+
+
+```
+
+
+## GSE63885_SE
+
+This is a dataset with adjuvant taxane/plantinum (or other chemo, which we filter out).
+
+```{r}
+GSE63885_SE <- qread("~/Data/Clinical Trial SE/GSE63885_SE.qs")
+
+GSE63885_taxane <- GSE63885_SE[, GSE63885_SE$treatment %in% "taxane/platinum"]
+
+```
+
+
+We can look at response, which is classified as a version of RECIST. 
+
+
+First looking at response
+
+```{r}
+
+GJB1.exp <- assay(GSE63885_taxane)["ENSG00000169562", ]
+
+# wilcox.test(split(GJB1.exp,GSE63885_taxane$residual.tumor.ch1)[[1]], split(GJB1.exp,GSE63885_taxane$residual.tumor.ch1)[[2]])
+
+boxplot(split(GJB1.exp,GSE63885_taxane$response))
+boxplot(split(GJB1.exp, GSE63885_taxane$response=="CR"))
+
+```
+
+
+
+## GSE14764_SE
+
+This is a dataset of adjuvant treated Paclitaxel + Carboplatin. 
+
+PMID: 19294737
+
+
+```{r}
+
+ov.data <- qread("../../data/Clinical Trial SE/GSE14764_SE.qs")
+
+```
+
+We can look at "response", in this trial quantified as residual tumour presence or absence, and survival. 
+
+First looking at response
+
+```{r}
+
+GJB1.exp <- assay(ov.data)["ENSG00000169562",]
+
+wilcox.test(split(GJB1.exp, ov.data$residual.tumor.ch1)[[1]], split(GJB1.exp, ov.data$residual.tumor.ch1)[[2]])
+
+boxplot(split(GJB1.exp, ov.data$residual.tumor.ch1))
+
+```
+
+No association with "response". 
+
+### Survival
+
+Likewise, there is no 
+```{r}
+
+surv.data <-  colData(ov.data)[,c("overall.survival.event.ch1", "overall.survival.time.ch1")]
+
+colnames(surv.data) <- c("event", 'time')
+surv.data$time <- as.numeric(surv.data$time)
+surv.data$event <- as.numeric(surv.data$event)
+
+
+surv.data$GJB1 <- ifelse(GJB1.exp <= median(GJB1.exp), "low", "high")
+
+
+
+ggsurvplot(survfit(Surv(time, event=event)~GJB1, surv.data), pval=T)
+
+
+
+```
+
+```{r}
+
+
+hist(GJB1.exp)
+
+```
+
+
+
+
+
+
+# GSE1562
+
+
+
+
+
+```{r}
+library(qs)
+
+ov.data2 <- qread("../../data/Clinical Trial SE/GSE15622_SE.qs")
+
+```
+
+
+
+
+```{r}
+
+myx <- ov.data2$treatment.ch1%in%c("Paclitaxel","Both") 
+
+GJB1.exp <- assay(ov.data2)["ENSG00000169562",myx]
+
+wilcox.test(split(GJB1.exp, ov.data2$response.ch1[myx])[[1]], split(GJB1.exp, ov.data2$response.ch1[myx])[[2]])
+
+boxplot(split(GJB1.exp, ov.data2$response.ch1[myx]))
+
+```
+
+In this dataset, we have both pre and post treatment samples. Lets look at the pre-treatment alone:
+
+```{r}
+
+myx <- ov.data2$treatment.ch1%in%c("Paclitaxel","Both") & grepl("pre", ov.data2$clinical.group.ch1)
+
+GJB1.exp <- assay(ov.data2)["ENSG00000169562",myx]
+
+wilcox.test(split(GJB1.exp, ov.data2$response.ch1[myx])[[1]], split(GJB1.exp, ov.data2$response.ch1[myx])[[2]])
+
+boxplot(split(GJB1.exp, ov.data2$response.ch1[myx]))
+
+```
+
+And now the post-treatment:
+
+```{r}
+
+myx <- ov.data2$treatment.ch1%in%c("Paclitaxel","Both") & grepl("post", ov.data2$clinical.group.ch1)
+
+GJB1.exp <- assay(ov.data2)["ENSG00000169562",myx]
+
+wilcox.test(split(GJB1.exp, ov.data2$response.ch1[myx])[[1]], split(GJB1.exp, ov.data2$response.ch1[myx])[[2]])
+
+boxplot(split(GJB1.exp, ov.data2$response.ch1[myx]))
+
+```
+
+It seems in this case, high expression of this marker post-treatment is trending towards predicting poor response. What if we look at the difference between pre/post for the whole cohort:
+
+
+
+```{r}
+
+myx <- ov.data2$treatment.ch1%in%c("Paclitaxel","Both")
+status <-  ifelse(grepl("post", ov.data2$clinical.group.ch1), "post", "pre")[myx]
+
+GJB1.exp <- assay(ov.data2)["ENSG00000169562",myx]
+
+wilcox.test(split(GJB1.exp, status)[[1]], split(GJB1.exp, status)[[2]])
+
+boxplot(split(GJB1.exp, status))
+
+```
+Lets look to see if matched expression changes in a particular way post treatment.
+
+```{r}
+myx <- ov.data2$treatment.ch1%in%c("Paclitaxel","Both")
+
+patients_with_two_samples <- names(table(gsub(colData(ov.data2)[myx,c("title")], pat="\\,.*", rep=""))[table(gsub(colData(ov.data2)[myx,c("title")], pat="\\,.*", rep=""))>1])
+
+pre_post_matched <- matrix(NA_real_, nrow=length(patients_with_two_samples), ncol=2)
+rownames(pre_post_matched) <- patients_with_two_samples
+colnames(pre_post_matched) <- c('Pre-treatment', 'Post-treatment')
+for(pt in patients_with_two_samples){
+  
+  pre_exp <-  assay(ov.data2)["ENSG00000169562",grepl(pat=paste0(pt, ","), ov.data2$title)&grepl("pre",  ov.data2$title)]
+  post_exp <-  assay(ov.data2)["ENSG00000169562",grepl(pat=paste0(pt, ","), ov.data2$title)&grepl("post",  ov.data2$title)]
+  pre_post_matched[pt,] <- c(pre_exp, post_exp)
+}
+
+
+boxplot(pre_post_matched[,1], pre_post_matched[,2])
+
+wilcox.test(pre_post_matched[,1], pre_post_matched[,2], paired = T)
+
+pre_post_matched <- data.frame(pre_post_matched, check.names = F)
+
+
+pre_post_matched$response <- sapply(patients_with_two_samples, function(pt) return(unique(ov.data2$response.ch1[grepl(pat=paste0(pt, ","), ov.data2$title)]) ))
+pre_post_matched$patient <- rownames(pre_post_matched)
+toPlot <- melt(pre_post_matched)
+
+
+ggplot(toPlot, aes(variable, value)) + geom_violin(fill="grey") + geom_point() + geom_line(aes(group = patient)) + theme_classic() + ylab("") + xlab("GJB1 Expression")
+
+pdf("pre_post_GJB1.pdf", height = 4, width = 4)
+ggplot(toPlot, aes(variable, value)) + geom_violin(fill="grey") + geom_point() + geom_line(aes(group = patient)) + theme_classic() + xlab("") + ylab("GJB1 Expression")
+dev.off()
+```
+
+
+
+
+
+
+
+
+

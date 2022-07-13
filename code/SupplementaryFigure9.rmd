@@ -1,0 +1,71 @@
+---
+title: "Supplementary Figure 9"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Sankey Diagram for Validation Data
+
+
+```{r}
+
+library(data.table)
+library(ggsankey)
+library(ggplot2)
+library(dplyr)
+
+
+
+metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+
+
+
+metaRes2 <- metaRes[, `Meta Analysis` := ifelse(FWER_genes < 0.05, "Significant", "Not Significant")]
+metaRes2[, `Meta Analysis` := factor(`Meta Analysis`, levels = c("Not Significant", "Significant"))]
+
+
+metaRes2[`Meta Analysis` %in% "Significant", `Validation Data` := "Not Available"]
+
+metaRes2[`Meta Analysis` %in% "Significant" & ((Drug == "Paclitaxel" & (Tissue %in% c("Breast", "Ovary/Fallopian Tube"))) | (Drug == "Erlotinib" & Tissue == "Lung")), `Validation Data` := "Available"]
+
+
+metaRes2[`Meta Analysis` %in% "Significant" & ((Drug == "Paclitaxel" & (Tissue %in% c("Breast", "Ovary/Fallopian Tube"))) | (Drug == "Erlotinib" & Tissue == "Lung")), `Clinically Validates` := "No"]
+
+metaRes2[Drug == "Paclitaxel" & Tissue == "Breast" & Gene == "ENSG00000115758", `Clinically Validates` := "Yes"]
+
+metaRes2[Drug == "Erlotinib" & Tissue == "Lung" & Gene == "ENSG00000116670", `Clinically Validates` := "Yes"]
+metaRes2 <- metaRes2[, `Dataset Analysis` := "Significant"]
+
+metaRes2 <- metaRes2[, .(`Dataset Analysis`, `Meta Analysis`, `Validation Data`)]
+
+
+
+test <- metaRes2 %>% make_long(colnames(metaRes2))
+
+test$node <- factor(test$node, levels = c("Significant", "Not Significant", "Available", "Not Available", "Yes", "No"))
+test$next_node <- factor(test$next_node, levels = c("Significant", "Not Significant", "Available", "Not Available", "Yes", "No"))
+
+
+png("figures/task2Sankey.png", res = 600, width = 6, height = 4, unit = "in")
+
+ggplot(test, aes(
+    x = x, next_x = next_x,
+    node = node,
+    next_node = next_node,
+    fill = node, label = node
+)) +
+    geom_sankey(flow.fill="gray50") +
+    geom_sankey_label(size = 3, color = "white", fill = "gray40") +
+    scale_fill_viridis_d() +
+    theme_sankey(base_size = 18) +
+    labs(x = NULL) +
+    theme(
+        legend.position = "none",
+        plot.title = element_text(hjust = .5)
+    )
+dev.off()
+
+
+```

@@ -1,0 +1,768 @@
+---
+title: "Figure 4, and related supplemental: Validating Breast Cancer Paclitaxel associations"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Patient Data
+
+
+```{r}
+
+
+library(PharmacoGx)
+library(PRROC)
+
+library(data.table)
+
+
+library(survcomp)
+library(survminer)
+library(readxl)
+library(ggplot2)
+library(SummarizedExperiment)
+library(readxl)
+
+library(qs)
+
+
+biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res//mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+biomarker_res <- biomarker_res[FWER_genes <= 0.05]
+
+```
+
+## MAQC2 cohort
+
+
+
+We look at a  cohort of breast cancers. This is a cohort of 278 pre-operative breast cancers.  All these patients received Paclitaxol with FAC (5-FU, Doxorubicin and Cyclophosphamide) prior to attempt at curative surgery. The outcome measured was pathological compete response at time of surgery. 
+
+The response rate in this dataset was 20%. 
+
+
+Loading in the data
+```{r}
+
+
+maqc.eset <- qread("~/Data/Clinical Trial SE/GSE20194_SE.qs")
+
+
+```
+
+### ODC1
+
+First, lets look at the ODC1 marker in the full dataset population. 
+
+```{r}
+ODC1 <- assay(maqc.eset["ENSG00000115758",])
+status <- maqc.eset$response
+
+
+
+
+png("figures/MAQC2_ODC_ROC.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(ODC1, weights.class0=status=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1, weights.class0=status=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+dev.off()
+```
+
+
+```{r}
+png("figures/MAQC2_ODC_PR.png", width=5, height=5, units="in", res=600)
+plot(pr.curve(ODC1, weights.class0=status=="pCR", curve=T), color=FALSE,  
+	auc.main=FALSE,
+	main=paste0("PR Curve\nAUC = ", format(pr.curve(ODC1, weights.class0=status=="pCR", curve=T)$auc.integral, digits=2)))
+lines(seq(0,1,0.01), rep(0.2014388, times=length(seq(0,1,0.01))))
+dev.off()
+```
+
+
+```{r}
+pdf("figures/MAQC2_ODC_boxplot.pdf")
+boxplot(split(ODC1, status), ylab="log RMA expression", pch=16)
+dev.off()
+
+odc1_split <- split(ODC1, status)
+wilcox.test(odc1_split[[1]], odc1_split[[2]])
+
+```
+
+#### Looking at sub-type association here
+First, lets see the distribution. We need to load in extended sample info here:
+
+```{r}
+sampleInfo <- data.table(data.frame(colData(maqc.eset))) # using data.table for its convenient syntax
+sampleInfo2 <- data.table(read_xls("~/Data/Clinical Trial SE/GSE20194_MDACC_Sample_Info.xls"))
+sampleInfo2 <- sampleInfo2[match(sampleInfo$title, title)]
+
+sampleInfo2[,.N,.(`characteristics: ER_status`,`characteristics: PR_status`, `HER2 Status`)]
+sampleInfo2[,ODC1_exp := ODC1]
+sampleInfo2[,TNBC := (`characteristics: ER_status` == "N" & 
+                      `characteristics: PR_status` == "N" &
+                       `HER2 Status` == "N")]
+
+receptorStatus <- split(sampleInfo2, by = c("characteristics: ER_status","characteristics: PR_status", "HER2 Status"))
+
+boxplot(lapply(receptorStatus[order(sapply(receptorStatus, \(x) return(median(x[["ODC1_exp"]]))))], `[[`, "ODC1_exp"))
+
+# pdf("ODC1_tnbc_expression_boxplot.pdf")
+# boxplot(split(ODC1, sampleInfo$TNBC)[2:1], pch=16)
+# dev.off()
+boxplot(split(ODC1, sampleInfo2$TNBC), pch=16)
+
+```
+
+Lets see if within TNBC's we still see an association:
+
+```{r}
+odc1_split_tnbc <- split(sampleInfo2[TNBC==TRUE, ODC1_exp], f= sampleInfo2[TNBC==TRUE, `characteristics: pCR_vs_RD`])
+boxplot(odc1_split_tnbc)
+
+wilcox.test(odc1_split_tnbc[[1]], odc1_split_tnbc[[2]])
+
+pdf("figures/MAQC_TNBC_strat_ODC1_association.pdf", width=7, height=5)
+ggplot(sampleInfo2, aes(`characteristics: pCR_vs_RD`, ODC1_exp)) + geom_boxplot(fill="lightgray") + facet_grid(~ifelse(TNBC, "TNBC", "Receptor Positive"))+ theme_classic() + xlab("") + ylab("ODC1 Expression")
+dev.off()
+```
+
+
+And within Non-TNBC's:
+
+```{r}
+odc1_split_recpos <- split(sampleInfo2[TNBC==FALSE, ODC1_exp], f= sampleInfo2[TNBC==FALSE, `characteristics: pCR_vs_RD`])
+boxplot(odc1_split_recpos)
+
+wilcox.test(odc1_split_recpos[[1]], odc1_split_recpos[[2]])
+
+```
+
+#### Test Set Performance
+
+The original study split the dataset into training and validation. They published performance metrics for their 40 different models on the validation set, so we can compare performance of our single gene marker to their classification ML models. 
+
+```{r}
+
+ODC1 <- assay(maqc.eset["ENSG00000115758",])
+status <- maqc.eset$response
+
+myx <- grepl(maqc.eset$description, pat="Validation")
+
+
+
+png("figures/MAQC2_ODC_ROC_Valid.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(ODC1[myx], weights.class0=status[myx]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1[myx], weights.class0=status[myx]=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+dev.off()
+
+
+
+# pdf("MAQC2_ODC_ROC_Valid.pdf", width=5, height = 5)
+# plot(roc.curve(ODC1[myx], weights.class0=status[myx]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+# 	main=paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1[myx], weights.class0=status[myx]=="pCR", curve=T)$auc, digits=2)))
+# lines(seq(0,1,0.01), seq(0,1,0.01))
+# dev.off()
+
+
+```
+
+Published Validation Models:
+
+```{r}
+
+valid.res <- read_excel("~/Data/Clinical Trial SE/bcr2468-S6.xls", sheet=3)
+
+png("figures/MAQC2_ODC_ROC_Valid_comparison.png", width=5, height=5, units="in", res=600)
+hist(valid.res$VALIDATION, main="", xlab="AUROC")
+abline(v=0.8, col="red")
+dev.off()
+```
+
+
+
+And, as an interesting extra challenge, lets look at the ER(-) subset, the hardest problem in their paper
+
+:
+
+```{r}
+
+
+
+ODC1 <- assay(maqc.eset["ENSG00000115758",])
+status <- maqc.eset$response
+
+myx <- grepl(maqc.eset$description, pat="Validation") & maqc.eset$er_status.ch1=="N"
+
+
+
+png("figures/MAQC2_ODC_ROC_Valid_ER_Neg.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(ODC1[myx], weights.class0=status[myx]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1[myx], weights.class0=status[myx]=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+dev.off()
+
+
+
+
+valid.res.erneg <- read_excel("~/Data/Clinical Trial SE/bcr2468-S6.xls", sheet=4)
+
+png("figures/MAQC2_ODC_ROC_Valid_comparison_ER_NEG.png", width=5, height=5, units="in", res=600)
+hist(valid.res.erneg$VALIDATION, main = "", xlab = "AUROC", xlim = c(0.2, 0.8))
+abline(v = 0.71, col = "red")
+dev.off()
+```
+
+
+### EIF5a
+
+
+```{r}
+EIF5a <- assay(maqc.eset["ENSG00000132507",])
+status <- maqc.eset$response
+
+
+# pdf("MAQC2_EIF5a_boxplot.pdf", width=7, height=7)
+boxplot(split(EIF5a, status), ylab="log RMA expression")
+# dev.off()
+
+
+
+library(PRROC)
+plot(roc.curve(EIF5a, weights.class0=status=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(EIF5a, weights.class0=status=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+
+pdf("figures/MAQC2_EIF5a_ROC.pdf", width=5, height=5)
+plot(roc.curve(EIF5a, weights.class0=status=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(EIF5a, weights.class0=status=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+dev.off()
+```
+
+
+```{r}
+png("figures/MAQC2_EIF5a_PR.png", width = 5, height = 5, units = "in", res = 600)
+plot(pr.curve(EIF5a, weights.class0=status=="pCR", curve=T), color=FALSE,  
+	auc.main=FALSE,
+	main=paste0("PR Curve\nAUC = ", format(pr.curve(EIF5a, weights.class0=status=="pCR", curve=T)$auc.integral, digits=2)))
+dev.off()library(devtools)
+
+
+```
+
+Unfortunately, as we see, this is not predictive in this dataset. 
+
+
+### EIF4A1
+
+Not on the microarray!
+
+### PAM50 subtyping
+
+Let us generate PAM50 subtypes for MAQC2. 
+
+```{r}
+library(genefu)
+data(pam50.robust)
+
+
+annot <- rowData(maqc.eset)
+rna.data <- t(assay(maqc.eset))
+
+annot$Gene.Symbol <- annot$gene_name
+annot$EntrezGene.ID <- annot$gene_id
+colnames(rna.data) <- annot$Gene.Symbol
+
+maqc.eset.PAM50 <- molecular.subtyping(sbt.model = "pam50", data = rna.data, annot=annot)
+
+
+
+
+```
+Now we can see if subtyping explains response in MAQCII
+
+```{r}
+
+library(ggplot2)
+
+
+ODC1 <- assay(maqc.eset)["ENSG00000115758",]
+
+
+toPlot <- data.frame("ODC1"=ODC1, "Response"= maqc.eset$response, "Pam50"=maqc.eset.PAM50$subtype)
+
+ggplot(toPlot[toPlot$Response%in%c("pCR", "RD"),], aes(Response, ODC1)) + geom_boxplot() + facet_grid(~Pam50) + theme_bw()
+
+pdf("MAQCII_PAM50_ODC1_boxplot.pdf", height = 4, width = 6)
+ggplot(toPlot[toPlot$Response%in%c("pCR", "RD"),], aes(Response, ODC1)) + geom_boxplot() + facet_grid(~Pam50) + theme_bw()
+dev.off()
+
+
+```
+
+
+Lets fit a Logistic regression to see if ODC1 is an independent predictor of response. 
+
+
+```{r}
+library(jtools)
+if(!require(ggstance)) BiocManager::install('ggstance')
+if(!require(broom.mixed)) BiocManager::install('broom.mixed')
+
+model <- glm(factor(Response, levels=c("RD", "pCR")) ~ Pam50+ODC1, family = binomial, data=toPlot)
+
+summary(model)
+
+anova(model, test = "LRT")
+
+pdf("figures/MAQCII_ODC1_GLM_pCR_coefficient_plot.pdf", width = 4)
+plot_summs(model, plot.distributions = TRUE)
+dev.off()
+
+
+```
+
+
+
+## GSE25066 - Hatzis C et al. 
+
+```{r}
+library(qs)
+
+GSE25066 <- qread("~/Data/Clinical Trial SE/GSE25066_SE.qs")
+
+ODC1_25066 <- assay(GSE25066)["ENSG00000115758",]
+
+hist(ODC1_25066)
+
+
+
+
+```
+
+Unfortunately, not all patients are labeled with which taxane they recieved. 
+
+```{r}
+
+pCR_split <- split(ODC1_25066, GSE25066$response)
+
+pdf("Hatzis_ODC1_expression_boxplot.pdf")
+boxplot(pCR_split)
+dev.off()
+
+
+
+wilcox.test(pCR_split[[1]], pCR_split[[2]])
+
+
+my.x <- !is.na(GSE25066$response)
+
+
+png("figures/Hatzis_ODC_ROC.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(ODC1_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+dev.off()
+
+png("figures/Hatzis_ODC_PR.png", width=5, height=5, units="in", res=600)
+plot(pr.curve(ODC1_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("PR Curve\nAUC = ", format(pr.curve(ODC1_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T)$auc.integral, digits=2)))
+lines(seq(0,1,0.01), rep(sum(GSE25066$response=="pCR", na.rm=T)/sum(!is.na(GSE25066$response)), length(seq(0,1,0.01))))
+dev.off()
+
+```
+
+
+## TNBC
+
+Lets check how this marker behaves with TNBC status in this dataset
+
+```{r}
+
+GSE25066$TNBC <- NA_character_
+
+GSE25066$TNBC <- ifelse(GSE25066$characteristics_ch1.3=='er_status_ihc: N' & GSE25066$characteristics_ch1.4=='pr_status_ihc: N'& GSE25066$characteristics_ch1.5=='her2_status: N', "TNBC", GSE25066$TNBC)
+
+GSE25066$TNBC <- ifelse(GSE25066$characteristics_ch1.3=='er_status_ihc: P' | GSE25066$characteristics_ch1.4=='pr_status_ihc: P'| GSE25066$characteristics_ch1.5=='her2_status: P', "Receptor Positive", GSE25066$TNBC)
+
+
+boxplot(rev(split(ODC1_25066, GSE25066$TNBC)))
+
+pdf("figures/Hatzis_ODC1_TNBC_boxplot.pdf", width=5, height=5)
+boxplot(rev(split(ODC1_25066, GSE25066$TNBC)), ylab="ODC1 Expression")
+dev.off()
+
+```
+
+Checking within TNBC
+
+
+```{r}
+
+myx <- GSE25066$TNBC== "TNBC"
+
+
+boxplot(split(ODC1_25066[myx], GSE25066$response[myx]))
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+
+
+```
+
+
+And now checking within receptor positive cancers:
+
+
+```{r}
+
+myx <- GSE25066$TNBC== "Receptor Positive"
+
+
+boxplot(split(ODC1_25066[myx], GSE25066$response[myx]))
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+
+
+```
+
+
+
+Lets see if within TNBC's we still see an association:
+
+```{r}
+
+toPlot <- data.frame("ODC1 Expression" = ODC1_25066, "Response" = GSE25066$response, TNBC = GSE25066$TNBC, check.names = FALSE)
+toPlot <- toPlot[complete.cases(toPlot),]
+
+pdf("figures/Hatzis_TNBC_strat_ODC1_association.pdf", width=7, height=5)
+ggplot(toPlot, aes(`Response`, `ODC1 Expression`)) + geom_boxplot(fill="lightgray") + facet_grid(~TNBC)+ theme_classic() + xlab("") + ylab("ODC1 Expression")
+dev.off()
+```
+
+
+
+
+Lets look at one more thing - how ODC1 expression is distributed within PAM50 subtypes, and if its still predictive inside the basal subtype. 
+
+
+
+```{r}
+
+boxplot(split(ODC1_25066, GSE25066$characteristics_ch1.20), las=3)
+
+
+```
+
+
+
+Lets look at its predictive power within subtypes, starting with Basal:
+
+```{r}
+library(ggplot2)
+
+
+
+toPlot <- data.frame("ODC1"=ODC1_25066, "Response"=  GSE25066$response, "Pam50"=GSE25066$characteristics_ch1.20)
+
+toPlot$Pam50 <- gsub(pat="pam50_class: ", rep="", x=toPlot$Pam50, fixed=TRUE)
+
+ggplot(toPlot[toPlot$Response%in%c("pCR", "RD"),], aes(Response, ODC1)) + geom_boxplot() + facet_grid(~Pam50) + theme_bw()
+
+myx <- GSE25066$characteristics_ch1.20== "pam50_class: Basal"
+
+
+
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+pdf("figures/Hatzis_PAM50_ODC1_boxplot.pdf", height = 4, width = 6)
+toPlot <- data.frame("ODC1"=ODC1_25066, "Response"=  GSE25066$response, "Pam50"=GSE25066$characteristics_ch1.20)
+toPlot$Pam50 <- gsub(pat="pam50_class: ", rep="", x=toPlot$Pam50, fixed=TRUE)
+
+ggplot(toPlot[toPlot$Response%in%c("pCR", "RD"),], aes(Response, ODC1)) + geom_boxplot() + facet_grid(~Pam50) + theme_bw()
+dev.off()
+
+
+
+```
+
+Doing an ANOVA to test whether ODC1 improves prediction over just knowning PAM50:
+
+```{r}
+library(jtools)
+require(ggstance)
+require(broom.mixed)
+model <- glm(factor(Response, levels=c("RD", "pCR")) ~ Pam50+ODC1, family = binomial, data=toPlot)
+
+summary(model)
+
+anova(model, test = "LRT")
+
+pdf("figures/Hatzis_ODC1_GLM_pCR_coefficient_plot.pdf", width = 4)
+plot_summs(model, plot.distributions = TRUE)
+dev.off()
+
+
+```
+
+
+Her2:
+
+```{r}
+
+
+myx <- GSE25066$characteristics_ch1.20== "pam50_class: Her2"
+
+
+
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+
+```
+
+
+
+LumA:
+
+```{r}
+
+
+myx <- GSE25066$characteristics_ch1.20== "pam50_class: LumA"
+
+
+
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+
+```
+
+
+LumB:
+
+```{r}
+
+
+myx <- GSE25066$characteristics_ch1.20== "pam50_class: LumB"
+
+
+
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+
+```
+
+
+
+
+Normal:
+
+```{r}
+
+
+myx <- GSE25066$characteristics_ch1.20== "pam50_class: Normal"
+
+
+
+wilcox.test(split(ODC1_25066[myx], GSE25066$response[myx])[[1]], split(ODC1_25066[myx], GSE25066$response[myx])[[2]])
+
+
+```
+
+
+
+
+## Lets compare the published subtypes to genefu PAM50
+
+The concordance looks pretty good. Her2 is not very concordant, but we also know that this dataset in particular selected out Her2 positive patients. 
+
+```{r}
+library(genefu)
+data(pam50.robust)
+
+
+annot <- rowData(GSE25066)
+rna.data <- t(assay(GSE25066))
+
+annot$Gene.Symbol <- annot$gene_name
+annot$EntrezGene.ID <- annot$gene_id
+colnames(rna.data) <- annot$Gene.Symbol
+
+GSE25066.PAM50 <- molecular.subtyping(sbt.model = "pam50", data = rna.data, annot=annot)
+
+table(PAM50$subtype,GSE25066$characteristics_ch1.20)
+
+
+```
+
+
+### Hatzis model predictions
+
+This doesn't seem to quite match the paper... I need to figure out how to subset to validation and training separately. 
+
+```{r}
+
+library(GEOquery)
+
+validationCohort <- getGEO("GSE25065")
+
+
+valid.x <- colnames(GSE25066) %in% validationCohort$GSE25065_series_matrix.txt.gz$geo_accession
+
+GSE25066.valid <- GSE25066[,valid.x]
+```
+
+```{r}
+
+
+set_res <- GSE25066.valid$set_class.ch1 %in% c('SET-Low')
+
+# chemo_pred <- GSE25066.valid$rcb_0_i_prediction.ch1 %in% "RCB-0/I"
+
+chemo_pred <- GSE25066.valid$chemosensitivity_prediction.ch1 == "Rx Sensitive" 
+
+predictions <- ifelse(chemo_pred, "Response", "NR")
+
+observations <- ifelse(GSE25066.valid$response=="pCR" |  GSE25066.valid$pathologic_response_rcb_class.ch1 == "RCB-0/I", "Response", "NR")
+
+
+confusionMatrix(factor(predictions[set_res], levels=c("Response", "NR")), factor(observations[set_res], levels=c("Response", "NR")))
+
+```
+
+I cannot even reproduce the prevalence of response. NB, the following does not match the paper:
+
+```{r}
+table(GSE25066.valid$chemosensitivity_prediction.ch1, GSE25066.valid$pathologic_response_pcr_rd.ch1, useNA="a")
+```
+
+
+
+# TCGA vs GTEX expression
+
+
+```{r}
+# options(timeout = Inf)
+# library(UCSCXenaTools)
+# XenaHub(cohorts ="TCGA TARGET GTEx") %>% 
+#   XenaFilter(filterDatasets = "TcgaTargetGtex_rsem_gene_tpm|TcgaTargetGTEX_phenotype")  -> df_todo
+# 
+# # XenaQuery(df_todo) %>% XenaDownload() %>% XenaPrepare() -> TCGA_TARGET_GTEX
+
+```
+
+
+```{r}
+TCGA_TARGET_GTEX <- qs::qread("~/Data/TCGA.TARGET.GTEx_mae.qs")
+
+
+```
+
+```{r}
+TCGA_TARGET_GTEX.rna <- TCGA_TARGET_GTEX[[1]]
+
+normal.samples <- TCGA_TARGET_GTEX.rna$sample[which(TCGA_TARGET_GTEX.rna$`_sample_type`%in%c("Solid Tissue Normal","Normal Tissue")&TCGA_TARGET_GTEX.rna$`_primary_site`%in%"Breast")]
+mygenerow <- grep(pat="ENSG00000115758", assay(TCGA_TARGET_GTEX.rna)[[1]])
+
+norm.exp <- unlist(assay(TCGA_TARGET_GTEX.rna[mygenerow,normal.samples]))
+
+tumour.samples <- TCGA_TARGET_GTEX.rna$sample[which(TCGA_TARGET_GTEX.rna$`_sample_type`%in%c("Primary Solid Tumor","Primary Tumor", "Recurrent Solid Tumor", "Recurrent Tumor")&TCGA_TARGET_GTEX.rna$`_primary_site`%in%"Breast")] 
+
+tumour.exp <- unlist(assay(TCGA_TARGET_GTEX.rna[mygenerow,tumour.samples]))
+
+
+pdf("ODC1_tumour_vs_normal_TCGA_GTEX_TARGET.pdf", width = 4, height = 4)
+boxplot(list(Tumour=tumour.exp, Normal=norm.exp), ylab="ODC1 Expression")
+dev.off()
+boxplot(list(Tumour=tumour.exp, Normal=norm.exp), ylab="ODC1 Expression")
+
+```
+
+
+
+
+
+
+# 41998
+
+```{r}
+GSE41998 <- qread("~/Data/Clinical Trial SE/GSE41998_SE.qs")
+
+GSE41998.taxol <- GSE41998[, GSE41998$treatment == "Paclitaxel"]
+
+```
+
+## ODC1
+
+```{r}
+
+
+ODC1 <- assay(GSE41998["ENSG00000115758", ])
+status <- GSE41998$characteristics_ch1.11 %in% c("pcr: Yes")
+
+
+wilcox.test(split(ODC1, status)[[1]], split(ODC1, status)[[2]])
+
+
+# png("rnaValidation/41998_ODC_ROC.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(ODC1, weights.class0 = status , curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1, weights.class0 = status , curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+
+
+```
+
+## EIF5A
+
+
+
+```{r}
+
+
+EIF5a <- assay(GSE41998.taxol["ENSG00000132507", ])
+status <- GSE41998.taxol$characteristics_ch1.11 %in% c("pcr: Yes")
+
+
+boxplot(split(EIF5a, status))
+
+# png("rnaValidation/MAQC2_ODC_ROC.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(EIF5a, weights.class0 = status , curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("ROC Curve\nAUC = ", format(roc.curve(EIF5a, weights.class0 = status, curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+```
+
+
+
+
+
+```{r}
+
+GSE41998.ixa <- GSE41998[, GSE41998$treatment == "Ixabepilone"]
+
+```
+
+
+```{r}
+
+
+ODC1 <- assay(GSE41998.ixa["ENSG00000115758", ])
+status <- GSE41998.ixa$characteristics_ch1.11 %in% c("pcr: Yes")
+
+wilcox.test(split(ODC1, status)[[1]], split(ODC1, status)[[2]])
+
+
+# png("rnaValidation/41998_ODC_ROC.png", width=5, height=5, units="in", res=600)
+plot(roc.curve(ODC1, weights.class0 = status , curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1, weights.class0 = status , curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+```

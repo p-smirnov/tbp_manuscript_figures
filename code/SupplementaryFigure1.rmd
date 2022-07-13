@@ -1,0 +1,148 @@
+---
+title: "Supplementary Figure 1"
+output: html_notebook
+---
+
+
+```{r}
+library(ggplot2)
+library(PharmacoGx)
+library(parallel)
+
+set.seed(5)
+
+nperm <- 10000
+
+CCLE <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.CTRPv2.rds"))
+
+breast.cells <- cellNames(CCLE)[cellInfo(CCLE)$tissueid %in% "Breast"]
+
+
+aac <- summarizeSensitivityProfiles(CCLE, "aac_recomputed", cell = breast.cells)
+
+gene.exp <- assay(summarizeMolecularProfiles(CCLE, mDataNames(CCLE), cell = breast.cells))
+
+prot.cod <- featureInfo(CCLE, mDataNames(CCLE))$gene_type %in% "protein_coding"
+
+gene.exp <- gene.exp[prot.cod,]
+```
+
+Sampling 1000 random protein coding genes 
+```{r}
+myx <- sample(rownames(gene.exp), 1000)
+
+gene.exp <- gene.exp[myx,]
+
+```
+
+Plotting distributions of drug response
+
+```{r}
+png("figures/lapdist.png", height = 5, width = 5, units = "in", res = 600)
+hist(aac["Lapatinib",], breaks=20, xlab="AAC")
+dev.off()
+
+png("figures/pacdist.png", height = 5, width = 5, units = "in", res = 600)
+hist(aac["Paclitaxel", ], breaks = 20, xlab = "AAC")
+dev.off()
+
+```
+
+Running Permutations With Lapatinib
+
+```{r}
+
+cl=makeCluster(10)
+
+system.time(
+lap.permutations <- parApply(cl=cl,gene.exp, 1, \(gexp, aac, nperm) {
+
+    sapply(seq_len(nperm), \(i){
+        cor.test(aac["Lapatinib", ], sample(gexp), use="pairwise")$p.val
+    })
+}, nperm=nperm, aac=aac)
+)
+stopCluster(cl)
+
+
+
+
+```
+
+
+Running Permutations With Paclitaxel
+
+```{r}
+
+cl=makeCluster(10)
+
+system.time(
+pac.permutations <- parApply(cl=cl,gene.exp, 1, \(gexp, aac, nperm) {
+
+    sapply(seq_len(nperm), \(i){
+        cor.test(aac["Paclitaxel", ], sample(gexp), use="pairwise")$p.val
+    })
+}, nperm=nperm, aac=aac)
+)
+stopCluster(cl)
+```
+
+
+
+
+```{r}
+png("figures/lapqqplot.png", height = 5, width = 5, units="in", res=600)
+plot(-log10(rank(lap.permutations) / length(lap.permutations)),
+     -log10(lap.permutations),
+     pch=16,
+     xlab="Expected -log10(p value)", 
+     ylab= "Observed -log10(p value)", 
+     main="All Genes")
+abline(a=0, b=1)
+dev.off()
+```
+
+
+
+
+```{r}
+
+png("figures/pacqqplot.png", height = 5, width = 5, units = "in", res = 600)
+plot(-log10(rank(pac.permutations) / length(pac.permutations)),
+    -log10(pac.permutations),
+    pch = 16,
+    xlab = "Expected -log10(p value)",
+    ylab = "Observed -log10(p value)",
+    main = "All Genes"
+)
+abline(a = 0, b = 1)
+dev.off()
+
+```
+
+
+
+```{r}
+myvec <- pac.permutations[20,]
+pdf("figures/pacSingleGene.pdf", height=5, width=5)
+plot(-log10(rank(myvec) / length(myvec)), -log10(myvec), 
+    pch=16,
+    xlab="Expected -log10(p value)", 
+    ylab= "Observed -log10(p value)", 
+    main=rownames(gene.exp)[20])
+abline(a=0, b=1)
+dev.off()
+```
+
+
+```{r}
+myvec <- lap.permutations[20,]
+pdf("figures/lapSingleGene.pdf", height=5, width=5)
+plot(-log10(rank(myvec) / length(myvec)), -log10(myvec), 
+    pch=16,
+    xlab="Expected -log10(p value)", 
+    ylab= "Observed -log10(p value)", 
+    main=rownames(gene.exp)[20])
+abline(a=0, b=1)
+dev.off()
+```

@@ -1,0 +1,148 @@
+---
+title: "Supplementary Figure 2"
+output: html_notebook
+---
+
+
+```{r}
+library(ggplot2)
+library(pheatmap)
+library(data.table)
+library(scales)
+library(PharmacoGx)
+
+GDSC1 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GDSC1.rds"))
+GDSC2 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GDSC2.rds"))
+CCLE <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.rds"))
+CTRPv2 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.CTRPv2.rds"))
+gCSI <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/gCSI.rds"))
+UHNBreast <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/UHNBreast.rds"))
+GRAY <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GRAY.rds"))
+
+
+pset.list <- list(
+    GDSC1,
+    GDSC2,
+    CCLE,
+    gCSI,
+    CTRPv2,
+    UHNBreast,
+    GRAY
+)
+
+tissues <- c(
+    "Bowel",
+    "Breast",
+    "CNS/Brain", 
+    "Esophagus/Stomach",
+    "Lung",
+    "Lymphoid",
+    "Ovary/Fallopian Tube",
+    "Skin"
+) 
+
+```
+
+
+Getting the max sample size for each tissue:
+
+```{r}
+
+tissue.sizes <- sapply(tissues, \(tissue){
+    return(max(sapply(pset.list, 
+    \(pset) return(sum(cellInfo(pset)$tissueid %in% tissue)))))
+})
+
+tissue.sizes <- data.table(data.frame("Sample Size" = tissue.sizes, check.names = F), keep.rownames = T)
+
+```
+
+
+
+```{r}
+metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+metaRes2 <- metaRes[FWER_genes < 0.05]
+
+minEstimatePerTissue <- metaRes2[, .("Minimum Absolute Correlation"=min(abs(estimate))), Tissue]
+
+minEstimatePerTissue <- merge(minEstimatePerTissue, tissue.sizes, by.x='Tissue', by.y='rn')
+
+minEstimatePerTissue$Tissue <- factor(minEstimatePerTissue$Tissue, levels = c(
+    "Skin",
+    "CNS/Brain",
+    "Esophagus/Stomach",
+    "Lung",
+    "Ovary/Fallopian Tube",
+    "Bowel", "Lymphoid",
+    "Breast"
+))
+
+
+pdf("figures/minEstimatePerTissue.pdf", height = 5, width=7)
+ggplot(minEstimatePerTissue) +
+    geom_point(aes(x = `Sample Size`, 
+                     y = `Minimum Absolute Correlation`, color=Tissue)) +
+                     theme_bw()
+dev.off()
+
+ggplot(minEstimatePerTissue) +
+    geom_point(aes(
+        x = `Sample Size`,
+        y = `Minimum Absolute Correlation`, color = Tissue
+    )) +
+    theme_bw()
+
+cor.test(minEstimatePerTissue[[2]], minEstimatePerTissue[[3]])
+
+```
+
+
+
+
+```{r}
+metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+metaRes2 <- metaRes[FWER_genes < 0.05]
+
+MaxEstimatePerTissue <- metaRes2[, .("Maximum Absolute Correlation"=max(abs(estimate))), Tissue]
+
+MaxEstimatePerTissue <- merge(MaxEstimatePerTissue, tissue.sizes, by.x='Tissue', by.y='rn')
+
+MaxEstimatePerTissue$Tissue <- factor(MaxEstimatePerTissue$Tissue, levels = c(
+    "Skin",
+    "CNS/Brain",
+    "Esophagus/Stomach",
+    "Lung",
+    "Ovary/Fallopian Tube",
+    "Bowel", "Lymphoid",
+    "Breast"
+))
+
+
+pdf("figures/MaxEstimatePerTissue.pdf", height = 5, width=7)
+ggplot(MaxEstimatePerTissue) +
+    geom_point(aes(x = `Sample Size`, 
+                     y = `Maximum Absolute Correlation`, color=Tissue)) +
+                     theme_bw()
+dev.off()
+
+ggplot(MaxEstimatePerTissue) +
+    geom_point(aes(
+        x = `Sample Size`,
+        y = `Maximum Absolute Correlation`, color = Tissue
+    )) +
+    theme_bw()
+
+cor.test(MaxEstimatePerTissue[[2]], MaxEstimatePerTissue[[3]])
+
+
+```
+
+
+
+
+
+
+
+

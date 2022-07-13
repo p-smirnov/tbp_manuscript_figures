@@ -1,0 +1,139 @@
+---
+title: "Figure 1"
+output: html_notebook
+---
+
+
+```{r}
+library(PharmacoGx)
+library(PRROC)
+library(ggplot2)
+library(pheatmap)
+library(data.table)
+library(scales)
+
+library(data.table)
+
+
+biomarker.res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/meta_res_pharmacodb.csv")
+
+toRunByGene <- fread("~/Code/tissue_biomarker/rnaResults/runlist_files/toRunMetaByGene.txt")
+
+colnames(toRunByGene) <- c("Gene", "Tissue", "Drug", "PSet", "Sig")
+
+nrow(toRunByGene)
+```
+
+The number of drug-tissue combination that could be tested in the study:
+```{r}
+nrow(unique(toRunByGene[,.(Drug, Tissue)]))
+```
+
+# Validation Rate per Dataset in Meta-Analysis
+
+
+I am treating any failure to validate in meta-analysis of a biomarker discovered in 1 dataset as a False Discovery. 
+
+```{r}
+
+library(ggplot2)
+test <- toRunByGene[biomarker.res,,on=.(Drug, Gene, Tissue)]
+
+toPlot <- test[Sig%in%0, as.list(prop.table(table(BF_p_all<0.05))), PSet]
+
+ggplot(toPlot, aes(`FALSE`, PSet)) + geom_col() + theme_classic() + xlab("False Discovery Rate") + ylab("Study") + xlim(c(0,1))
+
+pdf("figures/type1errorPerDataset.pdf", height=4, width=4)
+ggplot(toPlot, aes(`FALSE`, PSet)) + geom_col() + theme_bw() + xlab("False Discovery Rate") + ylab("Study") + xlim(c(0,1))
+dev.off()
+
+(toPlot)
+```
+
+
+# Plotting Biomarkers per drug and tissue
+
+
+```{r}
+
+toPlot <- biomarker.res[BF_p_all<=0.05, .N, .(Drug, Tissue)][order(N)]
+
+sortOrder <- unique(toPlot[,sum(N),Drug][order(V1)][,Drug])
+
+toPlot$Drug <- factor(toPlot$Drug, levels=sortOrder)
+toPlot$Tissue <- factor(toPlot$Tissue, levels=c("Skin",
+                                                "CNS/Brain",
+                                                "Esophagus/Stomach",
+                                                "Lung", 
+                                                "Ovary/Fallopian Tube",
+                                                "Bowel", "Lymphoid",
+                                                "Breast"))
+
+pdf(file = "figures/BiomarkerPerDrugDist.pdf", width=7, height = 5)
+ggplot(toPlot, aes(x=Drug, y=N, fill=Tissue)) + geom_bar(stat="identity")+ 
+        theme_bw() + 
+        theme(axis.text.x = element_text(hjust = 1, angle = 45)) + 
+        theme(legend.position = c(0.15, 0.65))
+dev.off()
+
+ggplot(toPlot, aes(x = Drug, y = N, fill = Tissue)) +
+    geom_bar(stat = "identity") +
+    theme_bw() +
+    theme(axis.text.x = element_text(hjust = 1, angle = 45))
+
+
+```
+
+
+
+
+# Looking at drug indictations
+
+Loading in and mapping MOA data. 
+
+```{r}
+
+moaData <- fread("~/Code/tissue_biomarker/drugInfo/data-moa-filtered.csv", header=TRUE)
+drug.annot <- fread("~/Code/Github/pachyderm/Annotations/drugs_with_ids.csv")
+
+```
+
+
+
+
+```{r}
+library(data.table)
+drugIndications <- fread("~/Code/tissue_biomarker/drugInfo/drugIndications.csv", header = FALSE)
+colnames(drugIndications) <- c("Drug", "Tissue")
+metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+library(ggplot2)
+
+
+
+numberInIndication <- metaRes[drugIndications, ,on=c("Drug", "Tissue")][FWER_genes<0.05, .N]
+
+fdaStatus <- fread("~/Code/tissue_biomarker/drugInfo/fdaStatus.csv")
+
+numberRepurposing <- metaRes[fdaStatus[(`FDA Approved`)], ,on=c("Drug")][!drugIndications, ,on=c("Drug", "Tissue")][FWER_genes<0.05, .N]
+
+
+numberNeither <- metaRes[!fdaStatus[(`FDA Approved`)], ,on=c("Drug")][FWER_genes<0.05, .N]
+
+toPlot <- data.frame('Status'=c(rep("In Indication", times=numberInIndication), rep("Off Label", times=numberRepurposing), rep("Novel", times=numberNeither)))
+toPlot$Status <- factor(toPlot$Status, levels=c("In Indication", "Off Label", "Novel"))
+
+pdf("figures/biomarkers_compare_offlabel_indication.pdf", width = 3, height = 3)
+ggplot(toPlot, aes(x=Status)) + geom_bar()+ theme_bw()
+dev.off()
+ggplot(toPlot, aes(x = Status)) +
+    geom_bar() +
+    theme_bw()
+
+table(toPlot)
+
+```
+
+
+
+
+

@@ -1,0 +1,601 @@
+---
+title: "Figure 3"
+output: html_notebook
+---
+
+
+
+
+
+```{r}
+library(piano)
+library(fgsea)
+library(ggplot2)
+
+library(Matrix)
+library(igraph)
+library(data.table)
+library(pheatmap)
+
+
+
+gene_info <- fread("~/Code/tissue_biomarker/geneInfo.csv")
+
+gene_info[, V1 := gsub(V1, pat = "\\.[0-9]+$", rep = "")]
+
+gene_symbol <- gene_info[, .(V1, gene_name)]
+
+colnames(gene_symbol)[1] <- "Gene"
+
+
+```
+
+
+# 3a)
+
+```{r}
+
+
+metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+multiDrugTable <- metaRes[FWER_genes<0.05,.("Drugs" = paste(Drug, collapse = ", "), "N" = .N),.(Tissue, Gene)]
+multiDrugTable <- metaRes[FWER_genes<0.05,.(Drug, "N" = .N),.(Tissue, Gene)]
+
+multiDrugTable <- multiDrugTable[order(-N)]
+
+metaRes2 <- data.frame(dcast(metaRes[Tissue == "Lung" & FWER_genes < 0.05], formula = Drug ~ Gene, value.var = "estimate", fill = 0))
+rownames(metaRes2) <- metaRes2$Drug
+metaRes2 <- data.matrix(metaRes2[, -1])
+
+drugsMoreThan100 <- metaRes[FWER_genes < 0.05 & Tissue == "Lung", .N, Drug][N >= 100, Drug]
+
+metaRes3 <- metaRes2[drugsMoreThan100, multiDrugTable[N > 3 & Tissue == "Lung", unique(Gene)]]
+
+
+pdf("figures/zoom_on_lung_signal_heatmap.pdf", height = 4, width = 5)
+pheatmap(metaRes3,
+    clustering_distance_rows = "correlation", clustering_distance_cols = "correlation",
+    clustering_method = "ward.D2", show_colnames = F, treeheight_col = 0
+)
+dev.off()
+
+
+pheatmap(metaRes3,
+    clustering_distance_rows = "correlation", clustering_distance_cols = "correlation",
+    clustering_method = "ward.D2", show_colnames = F, treeheight_col = 0
+)
+
+
+
+
+```
+
+
+# 3b)
+
+Lets look at a pathway analysis of these biomarkers. First, we identify the two clusters of drugs using simple hclust on a correlation distance. 
+
+
+
+```{r}
+## Prepare reactome pathways and drug clusters 
+  
+drugClust <- hclust(as.dist(1 - cor(t(metaRes3))), method = "ward.D2")
+
+drugAssignment <- cutree(drugClust, k = 2)
+
+reactomeBottom <- fread("~/Code/tissue_biomarker/pathways/ReactomeBottom.txt")
+reactomeBottom <- reactomeBottom[V6=="Homo sapiens"]
+reactomeBottom <- reactomeBottom[grepl(x=V1, pat="ENSG")]
+
+reactomePaths <-  split(reactomeBottom$V1, reactomeBottom$V4)
+
+
+## Prepare lists of genes signifying sensitivity to each cluster. 
+
+upInCluster1Sums <- colSums(sign(metaRes3[names(drugAssignment)[drugAssignment == 1], ]))
+
+upInCluster1 <- colnames(metaRes3)[apply(metaRes3[names(drugAssignment)[drugAssignment == 1], ], 2, function(x) all(x >= 0) & any(x > 0))]
+downInCluster1 <- colnames(metaRes3)[apply(metaRes3[names(drugAssignment)[drugAssignment == 1], ], 2, function(x) all(x <= 0) & any(x < 0))]
+
+upInCluster2 <- colnames(metaRes3)[apply(metaRes3[names(drugAssignment)[drugAssignment == 2], ], 2, function(x) all(x >= 0) & any(x > 0))]
+downInCluster2 <- colnames(metaRes3)[apply(metaRes3[names(drugAssignment)[drugAssignment == 2], ], 2, function(x) all(x <= 0) & any(x < 0))]
+
+setdiff(union(upInCluster1, downInCluster2), intersect(upInCluster1, downInCluster2))
+
+setdiff(union(upInCluster2, downInCluster1), intersect(upInCluster2, downInCluster1))
+
+UpIn1Genes <- intersect(upInCluster1, downInCluster2)
+UpIn2Genes <- intersect(upInCluster2, downInCluster1)
+
+
+```
+
+## Go ORA Analysis
+
+GO BP from mSigDB
+
+```{r}
+
+
+## For the msigdb sigs, we need to map to gene symbol.
+
+UpIn1Genes <- gene_info[match((UpIn1Genes), V1), gene_name]
+UpIn2Genes <- gene_info[match((UpIn2Genes), V1), gene_name]
+
+upInCluster1 <- gene_info[match((upInCluster1), V1), gene_name]
+upInCluster2 <- gene_info[match((upInCluster2), V1), gene_name]
+
+
+downInCluster1 <- gene_info[match((downInCluster1), V1), gene_name]
+downInCluster2 <- gene_info[match((downInCluster2), V1), gene_name]
+
+## we also use all protein coding genes as the universe, as this is technically the filtering we did at the beginning of the biomarker analysis. 
+
+universe <- gene_info$gene_name[gene_info$gene_type == "protein_coding"]
+
+
+```
+
+```{r}
+goBP <- fgsea::gmtPathways("~/Code/tissue_biomarker/pathways/c5.bp.v7.1.symbols.gmt")
+
+
+goUp1 <- fgsea::fora(goBP, upInCluster1, universe = universe)
+goDown1 <- fora(goBP, downInCluster1, universe=universe)
+
+
+goUp2 <- fora(goBP, UpIn2Genes, universe = universe)
+goDown2 <- fora(goBP, downInCluster2, universe=universe)
+
+
+upIn1Genesets <- intersect(goUp1[padj<0.05, pathway],goDown2[padj<0.05, pathway])
+downIn1Genesets <- intersect(goUp2[padj<0.05, pathway],goDown1[padj<0.05, pathway])
+
+goUp1[,Phenotype:=1]
+goDown1[,Phenotype:=-1]
+
+cluster1Table <- rbind(goUp1[, .(pathway,pathway, pval, padj, Phenotype) ],
+						goDown1[, .(pathway,pathway, pval, padj, Phenotype) ])
+
+colnames(cluster1Table) <- c("pathway", "Description", "p.Val", "FDR", "Phenotype")#, 'genes')
+
+
+write.table(cluster1Table, file="lung_two_cluster_cluster1_enrichment.txt", sep="\t", row.names=F, quote=F)
+
+
+goUp2[,Phenotype:=1]
+goDown2[,Phenotype:=-1]
+
+
+cluster2Table <- rbind(goUp2[, .(pathway,pathway, pval, padj, Phenotype) ],
+						goDown2[, .(pathway,pathway, pval, padj, Phenotype) ])
+
+colnames(cluster2Table) <- c("pathway", "Description", "p.Val", "FDR", "Phenotype")#, 'genes')
+
+
+write.table(cluster2Table, file="lung_two_cluster_cluster2_enrichment.txt", sep="\t", row.names=F, quote=F)
+
+
+## Intersection of genes
+
+
+goUp1 <- fgsea::fora(goBP, UpIn1Genes, universe = universe)
+goDown1 <- fora(goBP, UpIn2Genes, universe = universe)
+
+goUp1[, Phenotype := 1]
+goDown1[, Phenotype := -1]
+
+clusterTable <- rbind(
+    goUp1[, .(pathway, pathway, pval, padj, Phenotype)],
+    goDown1[, .(pathway, pathway, pval, padj, Phenotype)]
+)
+
+
+colnames(clusterTable) <- c("pathway", "Description", "p.Val", "FDR", "Phenotype") # , 'genes')
+
+
+write.table(clusterTable, file = "lung_two_cluster_intersect_enrichment.txt", sep = "\t", row.names = F, quote = F)
+
+
+```
+
+
+There were many results here, so we write it out to take a look at it using enrichmentbrowser in cytoscape. 
+
+
+# 3c)
+
+One idea could be that we are seeing differences according to cell type of origin. To take a look at this, we can use the cell type signatures 
+from mSigDB, looking specifically at lung signatures to decrease multiple testing. 
+
+```{r}
+
+## c8 cell type analysis
+
+c8paths <- fgsea::gmtPathways("~/Code/tissue_biomarker/pathways/c8.all.v7.5.1.symbols.gmt.txt")
+
+c8paths_lung <- c8paths[grep("TRAVAGLINI", names(c8paths), ignore.case = T)]
+
+c8UpInCluster1 <- fora(c8paths_lung, UpIn1Genes, universe = universe)
+c8DownInCluster1 <- fora(c8paths_lung, UpIn2Genes, universe = universe)
+
+
+```
+
+These results are interesting! First of all, the HDAC/BLC2/NAMPT cluster is enriched in sensitivity markers that overlap with markers of Neuroendocrine Cells. 
+However, Neuroendocrine cell type is a common characteristic of the two largest subtypes of SCLC. Furthermore, Subtype 1 of SCLC (the ASCL1 subtype) is hypothesized 
+to be more sensitive to BCL2 and HDAC inhibitors, with clinical trials ongoing for BCL2. (BCL2 results previously reported by Lochmann et al., 2018). 
+
+
+Lets plot these enrichments:
+
+```{r}
+library(ggrepel)
+toPlot <- c8UpInCluster1
+toPlot[,pfer:=p.adjust(pval, method="bonferroni")]
+
+pdf("figures/c8UpIn1.pdf", width = 5, height = 7)
+ggplot(toPlot, aes(overlap / size, -log10(pval))) +
+    geom_point() +
+    xlab("Percent Overlap between Markers") +
+    ylab("-log10(Fisher Test p-Value)") +
+    geom_hline(yintercept = -log10(0.05 / nrow(c8UpInCluster1))) +
+    theme_bw() +
+    geom_text_repel(data = toPlot[pfer < 0.05], aes(label = pathway), show.legend = F, max.overlaps = 5)
+dev.off()
+
+
+ggplot(toPlot, aes(overlap / size, -log10(pval))) +
+    geom_point() +
+    xlab("Percent Overlap between Markers") +
+    ylab("-log10(Fisher Test p-Value)") +
+    geom_hline(yintercept = -log10(0.05 / nrow(c8UpInCluster1))) +
+    theme_bw() +
+    geom_text_repel(data = toPlot[pfer < 0.05], aes(label = pathway), show.legend = F, max.overlaps = 5)
+```
+
+# Supplementary Figure 4
+
+```{r}
+
+
+toPlot <- c8DownInCluster1
+toPlot[, pfer := p.adjust(pval, method = "bonferroni")]
+
+pdf("figures/c8DownIn1.pdf", width = 7, height = 7)
+ggplot(toPlot, aes(overlap / size, -log10(pval))) +
+    geom_point() +
+    xlab("Percent Overlap between Markers") +
+    ylab("-log10(Fisher Test p-Value)") +
+    geom_hline(yintercept = -log10(0.05 / nrow(toPlot))) +
+    theme_bw() +
+    geom_text_repel(data = toPlot[pfer < 0.05], aes(label = pathway), show.legend = F, max.overlaps = 5)
+dev.off()
+
+ggplot(toPlot, aes(overlap / size, -log10(pval))) +
+    geom_point() +
+    xlab("Percent Overlap between Markers") +
+    ylab("-log10(Fisher Test p-Value)") +
+    geom_hline(yintercept = -log10(0.05 / nrow(toPlot))) +
+    theme_bw() +
+    geom_text_repel(data = toPlot[pfer < 0.05], aes(label = pathway), show.legend = F, max.overlaps = 5)
+
+```
+
+
+# 3d)
+
+## Investigating signatures of particular SCLC subtypes
+
+SCLC seems to be driven/subtyped by 4 main transcription factors: ASCL1, NEUROD1, YAP1, POU2F3. Using GTRD, I found genesets for targets of these transcription factors. 
+
+Additionally, MYCL1, BCL2, SOX2, DLL3 and CREBBP seem associated with the ASCL1 subtype, while MYC, HES6, HES1 and repression of ASCL1 are associated with NEUROD1. 
+INSM1 seems to be associated with both. 
+
+
+Lets take a look at whether these genes appear individually first. 
+
+
+```{r}
+
+library(pheatmap)
+
+metaRes4 <- metaRes2[drugsMoreThan100, ]
+
+
+colnames(metaRes4) <- gene_info[match(colnames(metaRes4), V1), gene_name]
+genesOfInterest <- c("MYCL1", "BCL2", "SOX2", "DLL3", "CREBBP", "MYC", "INSM1", "HES1", "HES6", "ASCL1", "NEUROD1", "YAP1", "POU2F3")
+
+metaRes4[c(names(drugAssignment[drugAssignment==1]),names(drugAssignment[drugAssignment==2])),intersect(colnames(metaRes4), c("MYCL1", "BCL2", "SOX2", "DLL3", "CREBBP", "MYC", "INSM1", "HES1", "HES6", "ASCL1", "NEUROD1", "YAP1", "POU2F3"))]
+metaRes5 <- metaRes4
+metaRes5[metaRes5==0] <- NA_real_
+toPlot <- data.frame(t(metaRes5[c(names(drugAssignment[drugAssignment == 1]), names(drugAssignment[drugAssignment == 2])), ]))[genesOfInterest, ]
+
+
+rownames(toPlot) <- genesOfInterest
+
+pdf("figures/sclcmarkers.pdf", width = 6, height = 5)
+pheatmap(toPlot,
+    cluster_rows = F, cluster_cols = F
+
+)
+dev.off()
+pheatmap(toPlot,
+    cluster_rows = F, cluster_cols = F
+)
+
+
+
+```
+
+
+# Supplmentary Figures 5 and 6
+
+
+```{r}
+
+library(PharmacoGx)
+library(ggplot2)
+library(data.table)
+library(reshape2)
+
+drugsOfInterest <- c("Daporinad", "Selumetinib", "Trametinib", "PD-0325901", "Vorinostat", "Navitoclax", "Dasatinib", "Panobinostat")
+
+
+gene.info <- read.csv("~/Code/tissue_biomarker/geneInfo.csv")
+
+GDSC1 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GDSC1.rds"))
+GDSC2 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GDSC2.rds"))
+CCLE <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.rds"))
+CTRPv2 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.CTRPv2.rds"))
+gCSI <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/gCSI.rds"))
+
+pset.list <- list(
+    GDSC1,
+    GDSC2,
+    CCLE,
+    gCSI,
+    CTRPv2
+)
+
+```
+
+
+```{r}
+
+toPlotList <- lapply(pset.list, \(pset) {
+    lungCells <- cellNames(pset)[cellInfo(pset)$tissueid == "Lung"]
+
+    SCLC.diseases <- c("Small cell lung carcinoma", "Lung carcinoid tumor")
+    NSCLC.diseases <- c(
+        "Adenosquamous lung carcinoma", "Large cell lung carcinoma", "Lung adenocarcinoma", "Lung giant cell carcinoma",
+        "Minimally invasive lung adenocarcinoma",
+        "Non-small cell lung carcinoma", "Papillary lung adenocarcinoma", "Squamous cell lung carcinoma"
+    )
+
+
+    lungCancerType <- rep(NA_character_, length(lungCells))
+
+    lungCancerType <- ifelse(cellInfo(pset)[lungCells, "Cellosaurus.Disease.Type"] %in% SCLC.diseases, "SCLC", lungCancerType)
+    lungCancerType <- ifelse(cellInfo(pset)[lungCells, "Cellosaurus.Disease.Type"] %in% NSCLC.diseases, "NSCLC", lungCancerType)
+
+    lungCancerType.m <- data.frame(Cell = lungCells, Disease = lungCancerType)
+    aac.mat <- summarizeSensitivityProfiles(pset,
+        sensitivity.measure = "aac_recomputed",
+        drugs = drugsOfInterest,
+        cell = lungCells,
+        fill.missing = T
+    )
+    aac.mat.m <- melt(t(scale(t(aac.mat))))
+    colnames(aac.mat.m) <- c("Drug", "Cell", "AAC")
+
+    gene.exp <- summarizeMolecularProfiles(pset, mDataNames(pset))
+
+    if (metadata(gene.exp)$annotation == "rna") {
+        YAP1.ensg <- gsub(pat = "\\.[0-9]+$", rep = "", gene.info$gene_id[match("YAP1", gene.info$gene_name)])
+        INSM1.ensg <- gsub(pat = "\\.[0-9]+$", rep = "", gene.info$gene_id[match("INSM1", gene.info$gene_name)])
+    } else {
+        YAP1.ensg <- gene.info$gene_id[match("YAP1", gene.info$gene_name)]
+        INSM1.ensg <- gene.info$gene_id[match("INSM1", gene.info$gene_name)]
+    }
+
+
+
+
+    YAP1.exp.mat.m <- melt(assay(gene.exp[YAP1.ensg, lungCells]))[, -1]
+    INSM1.exp.mat.m <- melt(assay(gene.exp[INSM1.ensg, lungCells]))[, -1]
+    colnames(YAP1.exp.mat.m) <- c("Cell", "YAP1")
+    colnames(INSM1.exp.mat.m) <- c("Cell", "INSM1")
+
+    res <- merge(merge(merge(aac.mat.m, YAP1.exp.mat.m, by = "Cell"), INSM1.exp.mat.m, by = "Cell"), lungCancerType.m, by = "Cell")
+    res$Dataset <- name(pset)
+    return(res)
+})
+
+```
+
+
+```{r}
+
+toPlot <- rbindlist(toPlotList)
+
+toPlot$Drug <- factor(toPlot$Drug, levels = c("Dasatinib", "Selumetinib", "Trametinib", "PD-0325901", "Vorinostat", "Navitoclax", "Daporinad", "Panobinostat"))
+
+
+pdf("figures/lung_yap1_vs_aac.pdf", width = 8)
+ggplot(toPlot[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")], aes(x = YAP1, y = AAC, color = Disease)) +
+    geom_point() +
+    facet_grid(Drug ~ Dataset) +
+    theme_bw() + ylab("z score (AAC)")
+dev.off()
+
+ggplot(toPlot[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")], aes(x = YAP1, y = AAC, color = Disease)) +
+    geom_point() +
+    facet_grid(Drug ~ Dataset) + 
+    theme_bw() + ylab("z score (AAC)")
+
+
+pdf("figures/lung_insm1_vs_aac.pdf", width=8)
+ggplot(toPlot[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")], aes(x = INSM1, y = AAC, color = Disease)) +
+    geom_point() +
+    facet_grid(Drug ~ Dataset) +
+    theme_bw() +
+    ylab("z score (AAC)")
+dev.off()
+
+ggplot(toPlot[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")], aes(x = YAP1, y = AAC, color = Disease)) +
+    geom_point() +
+    facet_grid(Drug ~ Dataset) +
+    theme_bw() +
+    ylab("z score (AAC)")
+
+
+```
+
+
+# 3e)
+
+Lets classify cells based on YAP1 and INSM1 bimodality, and then see which is more predictive, disease label or expression. 
+
+
+```{r}
+library(PRROC)
+source("code/getBiModalScore.R")
+
+
+yap1.by.dataset <- split(unique(toPlot[,.(Dataset, Cell, YAP1)]), by='Dataset')
+
+yap1.by.dataset <- lapply(yap1.by.dataset, \(x) return(x[complete.cases(x)])) 
+
+yap1.bimodal.fit.by.dataset <- lapply(yap1.by.dataset, \(x) getBiModalScore_Updated(x[, YAP1], type = "gaussianMix"))
+
+class.pred.by.dataset <- lapply(names(yap1.bimodal.fit.by.dataset), \(dataset){
+
+    class1logp <- dnorm(yap1.by.dataset[[dataset]][[3]],
+        mean = yap1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$mu[[1]],
+        sd = sqrt(yap1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$var[[1]]), log = TRUE
+    )
+    class2logp <- dnorm(yap1.by.dataset[[dataset]][[3]],
+        mean = yap1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$mu[[2]],
+        sd = sqrt(yap1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$var[[2]]), log = TRUE
+    )
+
+    data.frame(Cell = yap1.by.dataset[[dataset]][[2]], Class=apply(cbind(class1logp, class2logp), 1, which.max))
+})
+
+names(class.pred.by.dataset) <- names(yap1.bimodal.fit.by.dataset)
+
+class.pred.yap1 <- rbindlist(class.pred.by.dataset, idcol="Dataset")
+
+yap1.merged = merge(toPlot, class.pred.yap1)
+yap1.merged <- yap1.merged[complete.cases(yap1.merged)]
+
+toPlot2 <- rbind(yap1.merged[, .(Predictor="Disease",AUROC= roc.curve(scores.class0 = AAC, weights.class0 = (Disease == "NSCLC"))[[2]]), .(Dataset, Drug)],
+yap1.merged[, .(Predictor="Expression",AUROC=roc.curve(scores.class0 = AAC, weights.class0 = (Class == 2))[[2]]), .(Dataset, Drug)])
+
+## Fixing the sign on the direction of prediction for drugs in the difference class
+
+toPlot2[Drug %in% c("Vorinostat", "Navitoclax", "Daporinad", 'Panobinostat'), AUROC := 1-AUROC]
+
+toPlot2 <- toPlot2[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")]
+
+ggplot(toPlot2, aes(x = Predictor, y = AUROC)) +
+    geom_col() +
+    facet_grid(Dataset ~ Drug) +
+    theme_bw()
+
+pdf("figures/lung_yap1_vs_disease_AUROCs.pdf", width = 8)
+ggplot(toPlot2, aes(x = Predictor, y = AUROC)) +
+    geom_col() +
+    facet_grid(Dataset ~ Drug) + theme_bw() + theme(axis.text.x = element_text(angle=45, hjust=1))
+dev.off()
+
+
+
+toPlot2[,.SD[Predictor=="Expression",AUROC]>.SD[Predictor=="Disease",AUROC],.(Dataset, Drug)]
+
+
+pdf("figures/lung_yap1_vs_disease_AUROCs_boxplot.pdf", width = 5, height = 5)
+boxplot(list(
+    "YAP1 Expression" = toPlot2[Predictor == "Expression", AUROC],
+    "Disease" = toPlot2[Predictor == "Disease", AUROC]
+), ylab = "AUROC")
+dev.off()
+
+boxplot(list(
+    "YAP1 Expression" = toPlot2[Predictor == "Expression", AUROC],
+    "Disease" = toPlot2[Predictor == "Disease", AUROC]), ylab = "AUROC"
+)
+
+
+```
+
+
+```{r}
+
+
+
+insm1.by.dataset <- split(unique(toPlot[, .(Dataset, Cell, INSM1)]), by = "Dataset")
+
+insm1.by.dataset <- lapply(insm1.by.dataset, \(x) return(x[complete.cases(x)]))
+
+insm1.bimodal.fit.by.dataset <- lapply(insm1.by.dataset, \(x) getBiModalScore_Updated(x[, INSM1], type = "gaussianMix"))
+
+class.pred.by.dataset <- lapply(names(insm1.bimodal.fit.by.dataset), \(dataset){
+    class1logp <- dnorm(insm1.by.dataset[[dataset]][[3]],
+        mean = insm1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$mu[[1]],
+        sd = sqrt(insm1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$var[[1]]), log = TRUE
+    )
+    class2logp <- dnorm(insm1.by.dataset[[dataset]][[3]],
+        mean = insm1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$mu[[2]],
+        sd = sqrt(insm1.bimodal.fit.by.dataset[[dataset]]$mix$m.step$var[[2]]), log = TRUE
+    )
+
+    data.frame(Cell = insm1.by.dataset[[dataset]][[2]], Class = apply(cbind(class1logp, class2logp), 1, which.max))
+})
+
+names(class.pred.by.dataset) <- names(insm1.bimodal.fit.by.dataset)
+
+class.pred.insm1 <- rbindlist(class.pred.by.dataset, idcol = "Dataset")
+
+insm1.merged <- merge(toPlot, class.pred.insm1)
+insm1.merged <- insm1.merged[complete.cases(insm1.merged)]
+
+toPlot3 <- rbind(
+    insm1.merged[, .(Predictor = "Disease", AUROC = roc.curve(scores.class0 = AAC, weights.class0 = (Disease == "NSCLC"))[[2]]), .(Dataset, Drug)],
+    insm1.merged[, .(Predictor = "Expression", AUROC = roc.curve(scores.class0 = AAC, weights.class0 = (Class == 1))[[2]]), .(Dataset, Drug)]
+)
+
+## Fixing the sign on the direction of prediction for drugs in the difference class
+
+toPlot3[Drug %in% c("Vorinostat", "Navitoclax", "Daporinad", "Panobinostat"), AUROC := 1 - AUROC]
+
+toPlot3 <- toPlot3[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")]
+
+
+ggplot(toPlot3[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")], aes(x = Predictor, y = AUROC)) +
+    geom_col() +
+    facet_grid(Dataset ~ Drug) + theme_bw()
+
+pdf("figures/lung_insm1_vs_disease_AUROCs.pdf", width = 8)
+
+ggplot(toPlot3[Dataset %in% c("CCLE.CTRPv2", "GDSC_v1", "GDSC_v2")], aes(x = Predictor, y = AUROC)) +
+    geom_col() +
+    facet_grid(Dataset ~ Drug) + theme_bw() + theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+dev.off()
+
+
+toPlot3[, .SD[Predictor == "Expression", AUROC] > .SD[Predictor == "Disease", AUROC], .(Dataset, Drug)]
+
+pdf("figures/lung_insm1_vs_disease_AUROCs_boxplot.pdf", width = 5, height=5)
+boxplot(list("INSM1 Expression"=toPlot3[Predictor == "Expression", AUROC],
+         "Disease"=toPlot3[Predictor == "Disease", AUROC]), ylab="AUROC")
+dev.off()
+
+boxplot(list(
+    "INSM1 Expression" = toPlot3[Predictor == "Expression", AUROC],
+    "Disease" = toPlot3[Predictor == "Disease", AUROC]), ylab="AUROC"
+)
+```
