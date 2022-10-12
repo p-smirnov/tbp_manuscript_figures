@@ -5,9 +5,9 @@ output:
     df_print: paged
 ---
 
-# Sankey Diagram for Validation Data
+# Sankey/Consort Like Diagrams for Validation Data
 
-
+## Snakey Diagram Output
 ```{r}
 
 library(data.table)
@@ -66,6 +66,195 @@ ggplot(test, aes(
         plot.title = element_text(hjust = .5)
     )
 dev.off()
+
+
+```
+
+
+
+## Consort Diagram stats 
+
+Total Number of Triplets investigated
+```{r}
+library(data.table)
+toRunAll <- fread("~/Code/tissue_biomarker/rnaResults/runlist_files/geneExpressionMasterToRunList.txt", header=F)
+metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+toRunAll[,.N]
+
+```
+
+
+Total Number of Tissue-Drug Pairs Investigated
+```{r}
+unique(toRunAll[, .(V2, V3)])[,.N]
+```
+
+Total number of Pairs Signigicant in 1 dataset 
+
+```{r}
+unique(metaRes[, .(Drug, Tissue)])[,.N]
+
+```
+
+Total number of Pairs Signigicant after meta-analysis 
+
+```{r}
+unique(metaRes[`FWER_genes` <= 0.05, .(Drug, Tissue)])
+```
+
+
+### Loading in clinical dataset sheet
+
+```{r}
+
+clinicalData <- fread("~/Code/Github/tbp_manuscript_figures/data/All clinical datasets - Non-Immunotherapy datasets.csv")
+
+tissueDrugClin <- clinicalData[,.(`Treatment regimen`, `Standardized Tissue`)]
+
+```
+
+Spliting treatments into components 
+
+
+```{r}
+
+tdcSplit <- split(tissueDrugClin, by = c("Treatment regimen", "Standardized Tissue"))
+tdcSplit <- lapply(tdcSplit, \(dt){
+    dt <- unique(dt)
+    dt <- dt[,.(unlist(strsplit(`Treatment regimen`, split="\\+|\\||\\,")),`Standardized Tissue`)]
+    dt[,V1 := gsub("[A-Z]+\\s\\(|\\(|\\)", x=V1, rep="")]
+    return(dt)
+})
+
+tissueDrugClinLong <- rbindlist(tdcSplit)
+tissueDrugClinLong <- unique(tissueDrugClinLong)
+tissueDrugClinLong[,.N]
+
+```
+
+Intersecting with all possible biomarkers 
+
+
+```{r}
+
+toRunTissueDrug <- unique(toRunAll[, .(V2, V3)])
+colnames(tissueDrugClinLong) <- c("Drug", "Tissue")
+
+
+colnames(toRunTissueDrug) <- c('Tissue', "Drug")
+
+merge(toRunTissueDrug,tissueDrugClinLong, by=c("Drug", "Tissue"))[,.N]
+
+```
+
+
+Intersecting with dataset specific markers
+
+
+```{r}
+merge(unique(metaRes[,.(Tissue, Drug)]), tissueDrugClinLong, by = c("Drug", "Tissue"))[, .N]
+
+```
+
+
+Intersecting with meta-analysis markers
+
+
+```{r}
+merge(unique(metaRes[FWER_genes <= 0.05, .(Tissue, Drug)]), tissueDrugClinLong, by = c("Drug", "Tissue"))
+
+```
+
+# Sankey Diagram Attempt #2
+
+The plan here is to make a sankey on the level of drug-tissue/indictations. 
+
+```{r}
+library(data.table)
+library(ggsankey)
+library(ggplot2)
+library(dplyr)
+
+toRunTissueDrug[,`Has Clinical Data` := "No"]
+
+toRunTissueDrug[tissueDrugClinLong, `Has Clinical Data` := "Yes", on = .(Drug, Tissue)]
+toRunTissueDrug[, table(`Has Clinical Data`)]
+
+toRunTissueDrug[tissueDrugClinLong, `Has Clinical Data` := "Yes", on = .(Drug, Tissue)]
+
+toRunTissueDrug[, `Dataset Specific Marker` := "No"]
+
+toRunTissueDrug[unique(metaRes[,.(Drug, Tissue)]), `Dataset Specific Marker` := "Yes", on = .(Drug, Tissue)]
+toRunTissueDrug[, table(`Dataset Specific Marker`)]
+
+
+toRunTissueDrug[, `Meta-Analysis Marker` := "No"]
+
+toRunTissueDrug[unique(metaRes[FWER_genes <= 0.05, .(Drug, Tissue)]), `Meta-Analysis Marker` := "Yes", on = .(Drug, Tissue)]
+toRunTissueDrug[, table(`Meta-Analysis Marker`)]
+
+toRunTissueDrugToPlot <- toRunTissueDrug[, .(`Dataset Specific Marker`, `Meta-Analysis Marker`, `Has Clinical Data`)]
+
+
+test <- toRunTissueDrugToPlot %>% make_long(colnames(toRunTissueDrugToPlot))
+
+# test$node <- factor(test$node, levels = c("Significant", "Not Significant", "Available", "Not Available", "Yes", "No"))
+# test$next_node <- factor(test$next_node, levels = c("Significant", "Not Significant", "Available", "Not Available", "Yes", "No"))
+
+test <- data.table(test)
+test[, count := .N, .(x, node)]
+
+
+ggplot(test, aes(
+    x = x, next_x = next_x,
+    node = node,
+    next_node = next_node,
+    fill = node, label = count
+)) +
+    geom_sankey(flow.fill = "gray60", flow.color="gray30", node.color="gray30", flow.alpha=.70) +
+    geom_sankey_label(size = 3, color = "white", fill = "gray30") +
+    scale_fill_viridis_d() +
+    theme_sankey(base_size = 18) +
+    labs(x = NULL, fill = "") +
+    theme(
+        # legend.position = "none",
+    )
+
+pdf("figures/tissue_drug_sankey.pdf", width=10, height=4)
+ggplot(test, aes(
+    x = x, next_x = next_x,
+    node = node,
+    next_node = next_node,
+    fill = node, label = count
+)) +
+    geom_sankey(flow.fill = "gray60", flow.color = "gray30", node.color = "gray30", flow.alpha = .70) +
+    geom_sankey_label(size = 3, color = "white", fill = "gray30") +
+    scale_fill_viridis_d() +
+    theme_sankey(base_size = 18) +
+    labs(x = NULL, fill = "") +
+    theme(
+        # legend.position = "none",
+    )
+dev.off()
+
+
+
+# ggplot(test, aes(
+#     x = x, next_x = next_x,
+#     node = node,
+#     next_node = next_node,
+#     fill = node, label = node
+# )) +
+#     geom_alluvial(flow.alpha = .4) +
+#     geom_alluvial_label(size = 3, color = "white", fill = "gray40") +
+#     scale_fill_viridis_d() +
+#     theme_alluvial(base_size = 18) +
+#     labs(x = NULL) +
+#     theme(
+#         legend.position = "none",
+#         plot.title = element_text(hjust = .5)
+#     )
 
 
 ```

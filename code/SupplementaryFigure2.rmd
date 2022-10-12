@@ -79,10 +79,10 @@ minEstimatePerTissue$Tissue <- factor(minEstimatePerTissue$Tissue, levels = c(
 ))
 
 
-pdf("figures/minEstimatePerTissue.pdf", height = 5, width=7)
+pdf("figures/minEstimatePerTissue.pdf", height = 3, width=5)
 ggplot(minEstimatePerTissue) +
     geom_point(aes(x = `Sample Size`, 
-                     y = `Minimum Absolute Correlation`, color=Tissue)) +
+                     y = `Minimum Absolute Correlation`, color=Tissue), size=3) +
                      theme_bw()
 dev.off()
 
@@ -120,10 +120,10 @@ MaxEstimatePerTissue$Tissue <- factor(MaxEstimatePerTissue$Tissue, levels = c(
 ))
 
 
-pdf("figures/MaxEstimatePerTissue.pdf", height = 5, width=7)
+pdf("figures/MaxEstimatePerTissue.pdf", height = 3, width=5)
 ggplot(MaxEstimatePerTissue) +
     geom_point(aes(x = `Sample Size`, 
-                     y = `Maximum Absolute Correlation`, color=Tissue)) +
+                     y = `Maximum Absolute Correlation`, color=Tissue), size=3) +
                      theme_bw()
 dev.off()
 

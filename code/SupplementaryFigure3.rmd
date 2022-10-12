@@ -96,7 +96,7 @@ gene.info$ensg_clean <- gsub("\\.[0-9]+$", rep="", x=gene.info$gene_id)
 universe.of.genes <- unique(toRunByGene$Gene)
 universe.of.genes <- intersect(universe.of.genes, gene.info$ensg_clean[gene.info$gene_type%in%"protein_coding"])
 
-allsig.cgc.table <- table("CGC"=unique(toRunByGene$Gene)%in%cgc.all$Ensembl.id, "Signficant"=unique(toRunByGene$Gene)%in%sig.gene )
+allsig.cgc.table <- table("CGC" = universe.of.genes %in% cgc.all$Ensembl.id, "Signficant" = universe.of.genes %in% sig.gene)
 fisher.test(allsig.cgc.table)
 ```
 

@@ -103,14 +103,15 @@ sampleInfo2[,ODC1_exp := ODC1]
 sampleInfo2[,TNBC := (`characteristics: ER_status` == "N" & 
                       `characteristics: PR_status` == "N" &
                        `HER2 Status` == "N")]
+sampleInfo2[, TNBC := ifelse(TNBC, "TNBC", "Receptor Positive")]
 
 receptorStatus <- split(sampleInfo2, by = c("characteristics: ER_status","characteristics: PR_status", "HER2 Status"))
 
 boxplot(lapply(receptorStatus[order(sapply(receptorStatus, \(x) return(median(x[["ODC1_exp"]]))))], `[[`, "ODC1_exp"))
 
-# pdf("ODC1_tnbc_expression_boxplot.pdf")
-# boxplot(split(ODC1, sampleInfo$TNBC)[2:1], pch=16)
-# dev.off()
+pdf("figures/MAQC_ODC1_tnbc_expression_boxplot.pdf", height = 4, width = 4)
+boxplot(split(ODC1, sampleInfo2$TNBC)[2:1], pch = 16)
+dev.off()
 boxplot(split(ODC1, sampleInfo2$TNBC), pch=16)
 
 ```
@@ -118,13 +119,13 @@ boxplot(split(ODC1, sampleInfo2$TNBC), pch=16)
 Lets see if within TNBC's we still see an association:
 
 ```{r}
-odc1_split_tnbc <- split(sampleInfo2[TNBC==TRUE, ODC1_exp], f= sampleInfo2[TNBC==TRUE, `characteristics: pCR_vs_RD`])
+odc1_split_tnbc <- split(sampleInfo2[TNBC=="TNBC", ODC1_exp], f= sampleInfo2[TNBC=="TNBC", `characteristics: pCR_vs_RD`])
 boxplot(odc1_split_tnbc)
 
 wilcox.test(odc1_split_tnbc[[1]], odc1_split_tnbc[[2]])
 
-pdf("figures/MAQC_TNBC_strat_ODC1_association.pdf", width=7, height=5)
-ggplot(sampleInfo2, aes(`characteristics: pCR_vs_RD`, ODC1_exp)) + geom_boxplot(fill="lightgray") + facet_grid(~ifelse(TNBC, "TNBC", "Receptor Positive"))+ theme_classic() + xlab("") + ylab("ODC1 Expression")
+pdf("figures/MAQC_TNBC_strat_ODC1_association.pdf", width=4, height=4)
+ggplot(sampleInfo2, aes(`characteristics: pCR_vs_RD`, ODC1_exp)) + geom_boxplot(fill="lightgray") + facet_grid(~TNBC)+ theme_classic() + xlab("") + ylab("ODC1 Expression")
 dev.off()
 ```
 
@@ -318,7 +319,7 @@ summary(model)
 
 anova(model, test = "LRT")
 
-pdf("figures/MAQCII_ODC1_GLM_pCR_coefficient_plot.pdf", width = 4)
+pdf("figures/MAQCII_ODC1_GLM_pCR_coefficient_plot.pdf", width = 2.5, height = 4)
 plot_summs(model, plot.distributions = TRUE)
 dev.off()
 
@@ -343,13 +344,16 @@ hist(ODC1_25066)
 
 ```
 
-Unfortunately, not all patients are labeled with which taxane they recieved. 
+Unfortunately, not all patients are labeled with which taxane they recieved. Therefore, we will analyze everything together. 
+
+There were also 33 patients that recieved Taxol post-surgery, and presumably post pCR status determination. However, these are also not labeled. 
+We will double check that within the discovery cohort, the results stay the same. 
 
 ```{r}
 
 pCR_split <- split(ODC1_25066, GSE25066$response)
 
-pdf("Hatzis_ODC1_expression_boxplot.pdf")
+pdf("figures/Hatzis_ODC1_expression_boxplot.pdf")
 boxplot(pCR_split)
 dev.off()
 
@@ -437,7 +441,7 @@ Lets see if within TNBC's we still see an association:
 toPlot <- data.frame("ODC1 Expression" = ODC1_25066, "Response" = GSE25066$response, TNBC = GSE25066$TNBC, check.names = FALSE)
 toPlot <- toPlot[complete.cases(toPlot),]
 
-pdf("figures/Hatzis_TNBC_strat_ODC1_association.pdf", width=7, height=5)
+pdf("figures/Hatzis_TNBC_strat_ODC1_association.pdf", width = 4, height = 4)
 ggplot(toPlot, aes(`Response`, `ODC1 Expression`)) + geom_boxplot(fill="lightgray") + facet_grid(~TNBC)+ theme_classic() + xlab("") + ylab("ODC1 Expression")
 dev.off()
 ```
@@ -500,7 +504,7 @@ summary(model)
 
 anova(model, test = "LRT")
 
-pdf("figures/Hatzis_ODC1_GLM_pCR_coefficient_plot.pdf", width = 4)
+pdf("figures/Hatzis_ODC1_GLM_pCR_coefficient_plot.pdf", width = 2.5, height=4)
 plot_summs(model, plot.distributions = TRUE)
 dev.off()
 
@@ -597,6 +601,59 @@ table(PAM50$subtype,GSE25066$characteristics_ch1.20)
 ```
 
 
+# Double Check results in Discovery only 
+
+
+```{r}
+
+library(GEOquery)
+
+discoveryCohort <- getGEO("GSE25055")
+
+
+discovery.x <- colnames(GSE25066) %in% discoveryCohort$GSE25055_series_matrix.txt.gz$geo_accession
+
+GSE25066.discovery <- GSE25066[,discovery.x]
+
+ODC1_25066_discovery <- assay(GSE25066.discovery)["ENSG00000115758", ]
+
+
+pCR_split <- split(ODC1_25066_discovery, GSE25066.discovery$response)
+
+pdf("Hatzis_ODC1_expression_boxplot_discovery_only.pdf")
+boxplot(pCR_split)
+dev.off()
+
+wilcox.test(pCR_split[[1]], pCR_split[[2]])
+
+
+
+
+my.x <- !is.na(GSE25066.discovery$response)
+
+
+png("figures/Hatzis_ODC_ROC_discovery_only.png", width = 5, height = 5, units = "in", res = 600)
+plot(roc.curve(ODC1_25066_discovery[my.x], weights.class0 = GSE25066.discovery$response[my.x] == "pCR", curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("ROC Curve\nAUC = ", format(roc.curve(ODC1_25066_discovery[my.x], weights.class0 = GSE25066.discovery$response[my.x] == "pCR", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+dev.off()
+
+png("figures/Hatzis_ODC_PR_discovery_only.png", width = 5, height = 5, units = "in", res = 600)
+plot(pr.curve(ODC1_25066_discovery[my.x], weights.class0 = GSE25066.discovery$response[my.x] == "pCR", curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("PR Curve\nAUC = ", format(pr.curve(ODC1_25066_discovery[my.x], weights.class0 = GSE25066.discovery$response[my.x] == "pCR", curve = T)$auc.integral, digits = 2))
+)
+lines(seq(0, 1, 0.01), rep(sum(GSE25066.discovery$response == "pCR", na.rm = T) / sum(!is.na(GSE25066.discovery$response)), length(seq(0, 1, 0.01))))
+dev.off()
+
+
+
+```
+
+
+
 ### Hatzis model predictions
 
 This doesn't seem to quite match the paper... I need to figure out how to subset to validation and training separately. 
@@ -604,6 +661,7 @@ This doesn't seem to quite match the paper... I need to figure out how to subset
 ```{r}
 
 library(GEOquery)
+library(caret)
 
 validationCohort <- getGEO("GSE25065")
 
@@ -627,6 +685,7 @@ predictions <- ifelse(chemo_pred, "Response", "NR")
 observations <- ifelse(GSE25066.valid$response=="pCR" |  GSE25066.valid$pathologic_response_rcb_class.ch1 == "RCB-0/I", "Response", "NR")
 
 
+
 confusionMatrix(factor(predictions[set_res], levels=c("Response", "NR")), factor(observations[set_res], levels=c("Response", "NR")))
 
 ```
@@ -635,9 +694,10 @@ I cannot even reproduce the prevalence of response. NB, the following does not m
 
 ```{r}
 table(GSE25066.valid$chemosensitivity_prediction.ch1, GSE25066.valid$pathologic_response_pcr_rd.ch1, useNA="a")
+
 ```
 
-
+It looks like I cannot reproduce the predictions as in the paper. I contacted the first author but Unfortunately he was unable to help at this time. 
 
 # TCGA vs GTEX expression
 
@@ -698,9 +758,10 @@ GSE41998.taxol <- GSE41998[, GSE41998$treatment == "Paclitaxel"]
 ```{r}
 
 
-ODC1 <- assay(GSE41998["ENSG00000115758", ])
-status <- GSE41998$characteristics_ch1.11 %in% c("pcr: Yes")
+ODC1 <- assay(GSE41998.taxol["ENSG00000115758", ])
+status <- GSE41998.taxol$characteristics_ch1.11 %in% c("pcr: Yes")
 
+hist(ODC1)
 
 wilcox.test(split(ODC1, status)[[1]], split(ODC1, status)[[2]])
 

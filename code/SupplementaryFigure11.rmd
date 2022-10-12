@@ -7,7 +7,14 @@ output:
 
 # Ovarian + Taxol
 
-This should be fairly simple, there are 2 datasets, and only 1 marker.
+There are a few datasets to look at here: 
+GSE14764 - yes 
+GSE15622 - yes 
+GSE63885 - yes
+GSE31245 - yes
+
+
+Only 1 biomarker to check however.
 
 ```{r}
 
@@ -30,7 +37,8 @@ biomarker_res <- biomarker_res[FWER_genes <= 0.05]
 biomarker_res[Tissue=="Ovary/Fallopian Tube"]
 
 geneToCorrelate <- biomarker_res[Tissue=="Ovary/Fallopian Tube"&Drug=="Paclitaxel", Gene]
-
+as.res <- ad.res[cancer != "blood"]
+fwrite(ad.res, "ad.res.compiled.csv")
 
 ```
 
@@ -58,8 +66,14 @@ GJB1.exp <- assay(GSE63885_taxane)["ENSG00000169562", ]
 
 # wilcox.test(split(GJB1.exp,GSE63885_taxane$residual.tumor.ch1)[[1]], split(GJB1.exp,GSE63885_taxane$residual.tumor.ch1)[[2]])
 
-boxplot(split(GJB1.exp,GSE63885_taxane$response))
-boxplot(split(GJB1.exp, GSE63885_taxane$response=="CR"))
+GSE63885_taxane$response[GSE63885_taxane$response=="P"] <- 'PD'
+
+pdf("figures/GSE63885_gjb1_boxplot.pdf", width = 4, height = 4)
+boxplot(split(GJB1.exp, GSE63885_taxane$response)[c("PD", "SD", "PR", "CR")], ylab = "log(RMA Expression)")
+dev.off()
+boxplot(split(GJB1.exp, GSE63885_taxane$response)[c("PD", "SD", "PR", "CR")], ylab = "log(RMA Expression)")
+
+kruskal.test(GSE63885_taxane$response ~ GJB1.exp)
 
 ```
 
@@ -74,13 +88,13 @@ PMID: 19294737
 
 ```{r}
 
-ov.data <- qread("../../data/Clinical Trial SE/GSE14764_SE.qs")
+ov.data <- qread("~/Data/Clinical Trial SE/GSE14764_SE.qs")
 
 ```
 
 We can look at "response", in this trial quantified as residual tumour presence or absence, and survival. 
 
-First looking at response
+First looking at response:
 
 ```{r}
 
@@ -88,7 +102,14 @@ GJB1.exp <- assay(ov.data)["ENSG00000169562",]
 
 wilcox.test(split(GJB1.exp, ov.data$residual.tumor.ch1)[[1]], split(GJB1.exp, ov.data$residual.tumor.ch1)[[2]])
 
-boxplot(split(GJB1.exp, ov.data$residual.tumor.ch1))
+toPlot <- split(GJB1.exp, ov.data$residual.tumor.ch1)
+names(toPlot) <- c("No RD", "Residual Disease")
+
+boxplot(toPlot, ylab = "log(RMA Expression)")
+
+pdf("figures/GSE14764_gjb1_boxplot.pdf", width = 4, height = 4)
+boxplot(toPlot, ylab = "log(RMA Expression)")
+dev.off()
 
 ```
 
@@ -116,33 +137,19 @@ ggsurvplot(survfit(Surv(time, event=event)~GJB1, surv.data), pval=T)
 
 ```
 
-```{r}
 
-
-hist(GJB1.exp)
-
-```
-
-
-
-
-
-
-# GSE1562
-
-
-
+# GSE15622
 
 
 ```{r}
 library(qs)
 
-ov.data2 <- qread("../../data/Clinical Trial SE/GSE15622_SE.qs")
+ov.data2 <- qread("~/Data/Clinical Trial SE/GSE15622_SE.qs")
 
 ```
 
 
-
+Once again, we have sensitivity/resistance labels. We subset to those patients that received taxol therapy. 
 
 ```{r}
 
@@ -151,6 +158,7 @@ myx <- ov.data2$treatment.ch1%in%c("Paclitaxel","Both")
 GJB1.exp <- assay(ov.data2)["ENSG00000169562",myx]
 
 wilcox.test(split(GJB1.exp, ov.data2$response.ch1[myx])[[1]], split(GJB1.exp, ov.data2$response.ch1[myx])[[2]])
+
 
 boxplot(split(GJB1.exp, ov.data2$response.ch1[myx]))
 
@@ -166,7 +174,13 @@ GJB1.exp <- assay(ov.data2)["ENSG00000169562",myx]
 
 wilcox.test(split(GJB1.exp, ov.data2$response.ch1[myx])[[1]], split(GJB1.exp, ov.data2$response.ch1[myx])[[2]])
 
-boxplot(split(GJB1.exp, ov.data2$response.ch1[myx]))
+toPlot <- split(GJB1.exp, ov.data2$response.ch1[myx])
+names(toPlot) <- c("Resistant","Sensitive")
+
+pdf("figures/GSE15622_gjb1_boxplot.pdf", width = 4, height = 4)
+boxplot(toPlot, ylab = "log(RMA Expression)")
+dev.off()
+boxplot(toPlot, ylab = "log(RMA Expression)")
 
 ```
 
@@ -232,12 +246,45 @@ toPlot <- melt(pre_post_matched)
 
 ggplot(toPlot, aes(variable, value)) + geom_violin(fill="grey") + geom_point() + geom_line(aes(group = patient)) + theme_classic() + ylab("") + xlab("GJB1 Expression")
 
-pdf("pre_post_GJB1.pdf", height = 4, width = 4)
+pdf("figures/GSE15622_pre_post_GJB1.pdf", height = 4, width = 4)
 ggplot(toPlot, aes(variable, value)) + geom_violin(fill="grey") + geom_point() + geom_line(aes(group = patient)) + theme_classic() + xlab("") + ylab("GJB1 Expression")
 dev.off()
 ```
 
 
+
+# GSE31245
+
+```{r}
+
+GSE31245_SE <- qread("~/Data/Clinical Trial SE/GSE31245_SE.qs")
+
+```
+
+```{r}
+
+GJB1.exp <- assay(GSE31245_SE)["ENSG00000169562", ]
+
+surv.data <- colData(GSE31245_SE)[, c("event_occured", "survival_time")]
+
+colnames(surv.data) <- c("event", 'time')
+surv.data$time <- as.numeric(surv.data$time)
+surv.data$event <- as.numeric(surv.data$event)
+
+
+surv.data$GJB1 <- ifelse(GJB1.exp <= median(GJB1.exp), "low", "high")
+
+
+# pdf("figures/GSE31245_surv_gjb1.pdf", height=4, width=4)
+p <- ggsurvplot(survfit(Surv(time, event = event) ~ GJB1, surv.data), pval = T)
+# dev.off()
+
+ggsave(filename="figures/GSE31245_surv_gjb1.pdf", plot=p$plot, width=4, height = 4)
+
+ggsurvplot(survfit(Surv(time, event = event) ~ GJB1, surv.data), pval = T)
+
+
+```
 
 
 

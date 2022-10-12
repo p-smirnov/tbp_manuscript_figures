@@ -71,6 +71,27 @@ pheatmap(metaRes3,
 ```
 
 
+
+```{r}
+
+pheatmap(metaRes2,
+    clustering_distance_rows = "correlation", clustering_distance_cols = "correlation",
+    clustering_method = "ward.D2", show_colnames = F, treeheight_col = 0
+)
+
+
+pdf("figures/lung_heatmap.pdf", height = 7, width = 5)
+pheatmap(metaRes2,
+    clustering_distance_rows = "correlation", clustering_distance_cols = "correlation",
+    clustering_method = "ward.D2", show_colnames = F, treeheight_col = 0
+)
+dev.off()
+dim(metaRes2)
+
+median(apply(metaRes2, 1, \(x)(sum(x != 0))))
+
+```
+
 # 3b)
 
 Lets look at a pathway analysis of these biomarkers. First, we identify the two clusters of drugs using simple hclust on a correlation distance. 
@@ -108,6 +129,10 @@ setdiff(union(upInCluster2, downInCluster1), intersect(upInCluster2, downInClust
 UpIn1Genes <- intersect(upInCluster1, downInCluster2)
 UpIn2Genes <- intersect(upInCluster2, downInCluster1)
 
+
+GeneAssignment <- data.frame(Gene = c(UpIn1Genes, UpIn2Genes), Cluster=c(rep(1,times=length(UpIn1Genes)),rep(2, times=length(UpIn2Genes))))
+
+fwrite(GeneAssignment, file="LungClusteringGeneAssignment.csv")
 
 ```
 

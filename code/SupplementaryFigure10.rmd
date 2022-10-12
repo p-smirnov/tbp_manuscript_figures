@@ -1,233 +1,506 @@
 ---
-title: "Validation of Lung Markers for Erlotinib."
+title: "Lymphoid Validation of Doxorubicin markers."
 output:
   html_document:
     df_print: paged
-  html_notebook: default
 ---
 
-# Lung + Erlotinib
+# Lymphoid + Doxorubicin
 
-This should be fairly simple, there is 1 dataset.
-
-
+Just one public dataset here, but I can check several biomarkers. 
 
 ```{r}
 
-
+suppressPackageStartupMessages({
 library(PharmacoGx)
-library(survcomp)
-library(survminer)
 library(readxl)
 library(ggplot2)
 library(qs)
+library(stringr)
 
 library(data.table)
+})
 
 
-biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res//mrna_gene_drug_tissue_res_pharmacodb.csv")
+biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
 
 biomarker_res <- biomarker_res[FWER_genes <= 0.05]
 
+biomarker_res[Tissue == "Lymphoid" & Drug == "Doxorubicin"]
 
-
-geneToCorrelate <- biomarker_res[Tissue=="Lung"&Drug=="Erlotinib", Gene]
-
-
-
-battle1.se <- qread("~/Code/univariate_rna_validation/data/Clinical Trial SE/GSE33072_SE.qs")
-
-battle1.erlotinib <- battle1.se[,battle1.se$treatment %in% "erlotinib"] #note, missing 1 patient on "erlotinib+bexarotene"
-
-
-summary(as.numeric(battle1.erlotinib$survival_time))
-battle1.erlotinib$event_occured <- ifelse(battle1.erlotinib$progression.free.survival.status.ch1 %in% 1, 1, 0)
+genesToCorrelate <- biomarker_res[Tissue == "Lymphoid" & Drug == "Doxorubicin", Gene]
 
 
 ```
 
 
-
-In this case, we have multiple markers to look at, and not too many patients. Therefore, we will apply the filters from Task 1 to narrow down the search space to only those that aren't rejected as "too different" between cell lines and patients. 
-
-Lets check all the markers in a loop:
-
-
-Now we can check the correlation with survival using the concordance index. Unfortunately, there are no labels for "response" in the erlotinib cohort. 
-
-The way the following code is designed, we use the sign of the estimate from the cell line analysis to make higher c-index correspond to predictions in the same direction as cell lines. 
-
-Note that the p values from surv.comp are known to be anti-conservative, so we confirm with a permutation test. 
-
-
+Lets load in both the datasets from the Winter study. 
 ```{r}
-library(parallel)
-cl=makeCluster(24)
-
-clusterExport(cl=cl, c("biomarker_res", "battle1.erlotinib"))
-
-permutation.res <- parallel::parSapply(cl=cl, geneToCorrelate, \(gene) {
-  # gene <- "ENSG00000116670"
-  gene.exp <- SummarizedExperiment::assay(battle1.erlotinib)[gene, ]
-
-## Using Hmisc because it is much faster
-  obs <- Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * gene.exp, 
-                           survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
-
-  perms <- sapply(1:100000, function(i) {
-  Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * sample(gene.exp),
-                    survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
-})
-
-  p.val <- mean(abs(obs - 0.5) < abs(perms - 0.5))
-  return(c("CI" = obs, p.value = p.val))
-})
-
-stopCluster(cl)
-
-permutation.res
+GSE14615_SE <- qread("~/Data/Clinical Trial SE/GSE14615_SE.qs")
+GSE14613_SE <- qread("~/Data/Clinical Trial SE/GSE14613_SE.qs")
 
 ```
 
+# First Looking at GSE14615_SE
+```{r}
+setdiff(genesToCorrelate, rownames(GSE14615_SE))
+genesToCorrelate <- intersect(genesToCorrelate, rownames(GSE14615_SE))
+```
 
 ```{r}
 
+sapply(genesToCorrelate, function(gene){
 
-
-
-# load("~/Data/Task1 Filter/results_01112022/AD/ad.cancer.type.ccle.RData")
-load("~/Code/tissue_biomarker/farnoosh_ks_res/results/ad.res.scale.RData")
-ad.res <- data.table(ad.res)
-
-ad.res[,mean(padj.BH<.1), cancer]
-
-
-# merged.biomarker.res <- merge(biomarker_res, ad.res, by.x=c("Gene", "Tissue"), by.y=c("gene", "lineage"))
-# # merged.biomarker.res[Gene %in% names(concordance.index.res[sapply(concordance.index.res, function(x) return(x$p.value < 0.001))])&Drug=="Erlotinib"]
-# geneToCorrelate <- merged.biomarker.res[Gene %in% geneToCorrelate&Drug=="Erlotinib"&padj.BH>0.1, Gene]
-
-geneToCorrelate <- intersect(ad.res[cancer == "lung" & padj.BH > 0.1, gene], geneToCorrelate)
+    toTest <- data.frame(gene = assay(GSE14615_SE)[gene,], 
+                      response = GSE14615_SE$response)
+    
+    kruskal.test(gene~response, toTest)
+})
 
 
 ```
 
 
-We can check if applying this filter would allow us to detect a significant effect. 
+Lets plot both since there is only 2. Starting with the trending marker YIF1A (ENSG00000174851)
 
 
 ```{r}
-library(parallel)
-cl=makeCluster(24)
+gene.exp <- assay(GSE14615_SE)["ENSG00000174851", ]
 
-clusterExport(cl=cl, c("biomarker_res", "battle1.erlotinib"))
+toPlot <- data.frame(YIF1A = gene.exp, Response = GSE14615_SE$response, 
+                     check.names = FALSE)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
 
-permutation.res <- parallel::parSapply(cl=cl, geneToCorrelate, \(gene) {
-  # gene <- "ENSG00000116670"
-  gene.exp <- SummarizedExperiment::assay(battle1.erlotinib)[gene, ]
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
 
-## Using Hmisc because it is much faster
-  obs <- Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * gene.exp, 
-                           survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
-
-  perms <- sapply(1:100000, function(i) {
-  Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * sample(gene.exp),
-                    survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
-})
-
-  p.val <- mean(abs(obs - 0.5) < abs(perms - 0.5))
-  return(c("CI" = obs, p.value = p.val))
-})
-
-stopCluster(cl)
-
-permutation.res
-```
-
-
-For plotting purposes, we will look at a Kaplan Meier, however it is not a significant marker when you binarize using the median. 
-
-```{r}
-
-library(survcomp)
-library(survminer)
-library(ggplot2)
-
-
-png("figures/mad2l2_pfs_km.png", res=600, height = 5, width=5, units="in")
-surv.data <- data.frame(time=as.numeric(battle1.erlotinib$survival_time), event=battle1.erlotinib$event_occured, MAD2L2=ifelse(assay(battle1.erlotinib)["ENSG00000116670",]>median(assay(battle1.erlotinib)["ENSG00000116670",]),"High", "Low"))
-ggsurvplot(survfit(Surv(time, event=event)~MAD2L2, surv.data), pval=F)
+pdf("figures/GSE14615_YIF1A_Boxplot.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
 dev.off()
+```
+
+Now with the marker GABRG2 (ENSG00000113327)
+
+
+```{r}
+gene.exp <- assay(GSE14615_SE)["ENSG00000113327", ]
+
+toPlot <- data.frame(GABRG2 = gene.exp, Response = GSE14615_SE$response, 
+                     check.names = FALSE)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
+
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+
+pdf("figures/GSE14615_GABRG2_Boxplot.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+dev.off()
+```
+
+
+
+# Now Looking at GSE14613_SE
+```{r}
+setdiff(genesToCorrelate, rownames(GSE14613_SE))
+genesToCorrelate <- intersect(genesToCorrelate, rownames(GSE14613_SE))
+```
+
+```{r}
+
+sapply(genesToCorrelate, function(gene){
+
+    toTest <- data.frame(gene = assay(GSE14613_SE)[gene,], 
+                      response = GSE14613_SE$response)
+    
+    kruskal.test(gene~response, toTest)
+})
 
 
 ```
 
 
-# Checking prognosis and healthy vs disease tissue
+Lets plot both since there is only 2. Starting with the trending marker YIF1A (ENSG00000174851). 
+
 
 ```{r}
-library(UCSCXenaTools)
-XenaGenerate(subset = XenaHostNames=="tcgaHub") %>% 
-  XenaFilter(filterDatasets = "clinical|HiSeqV2$") %>% 
-  XenaFilter(filterDatasets = "LUAD") -> df_todo
+gene.exp <- assay(GSE14613_SE)["ENSG00000174851", ]
 
-XenaQuery(df_todo) %>% XenaDownload() %>% XenaPrepare() -> LUAD
+toPlot <- data.frame(YIF1A = gene.exp, Response = GSE14613_SE$response, 
+                     check.names = FALSE)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
 
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
+
+pdf("figures/GSE14613_YIF1A_Boxplot.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
+dev.off()
+```
+
+Now with the marker GABRG2 (ENSG00000113327)
+
+
+```{r}
+gene.exp <- assay(GSE14613_SE)["ENSG00000113327", ]
+
+toPlot <- data.frame(GABRG2 = gene.exp, Response = GSE14613_SE$response, 
+                     check.names = FALSE)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
+
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+
+pdf("figures/GSE14613_GABRG2_Boxplot.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+dev.off()
+```
+
+# Combining the two datasets naively
+
+
+```{r}
+
+sapply(genesToCorrelate, function(gene){
+
+    toTest <- data.frame(gene = c(assay(GSE14613_SE)[gene,],assay(GSE14615_SE)[gene,]), 
+                      response = c(GSE14613_SE$response, GSE14615_SE$response) )
+    
+    kruskal.test(gene~response, toTest)
+})
 
 
 ```
 
+
+
 ```{r}
+gene.exp <- c(assay(GSE14613_SE)["ENSG00000174851", ], 
+              assay(GSE14615_SE)["ENSG00000174851", ])
 
-MAD2L2.tcga <- unlist(LUAD$HiSeqV2.gz[LUAD$HiSeqV2.gz$sample=="MAD2L2",-1])
+toPlot <- data.frame(YIF1A = gene.exp, Response = c(GSE14613_SE$response, GSE14615_SE$response), 
+                     dataset = c(rep("GSE14613", times=ncol(GSE14613_SE)),rep("GSE14615", times=ncol(GSE14615_SE))),
+                     check.names = FALSE)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
 
-hist(MAD2L2.tcga)
+ggplot(toPlot, aes(x = YIF1A, fill = dataset)) +
+     geom_density()
 
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
 
+pdf("figures/Winters_Combined_YIF1A_Boxplot.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
+dev.off()
 ```
 
+The batch effect seems too strong here to make this a meaningful comparison. 
+
 
 ```{r}
-
-LUAD.pfs.event <- !is.na(LUAD$LUAD_clinicalMatrix$days_to_new_tumor_event_after_initial_treatment)
-
-LUAD.pfs.time <- ifelse(LUAD.pfs.event, LUAD$LUAD_clinicalMatrix$days_to_new_tumor_event_after_initial_treatment, LUAD$LUAD_clinicalMatrix$days_to_last_followup)
-
-common.patients <- intersect(LUAD$LUAD_clinicalMatrix$sampleID, names(MAD2L2.tcga))
-
-surv.order <- match(common.patients, LUAD$LUAD_clinicalMatrix$sampleID)
-
-exp.order <- match(common.patients, names(MAD2L2.tcga))
-
-## Using Hmisc because it is much faster
-obs <- Hmisc::rcorr.cens(MAD2L2.tcga[exp.order],Surv(as.numeric(LUAD.pfs.time)[surv.order], LUAD.pfs.event[surv.order]))[[1]]
-
-perms <- sapply(1:1000, function(i) 
-Hmisc::rcorr.cens(MAD2L2.tcga[sample(exp.order)],Surv(as.numeric(LUAD.pfs.time)[surv.order], LUAD.pfs.event[surv.order]))[[1]]
+gene.exp <- c(
+    assay(GSE14613_SE)["ENSG00000113327", ],
+    assay(GSE14615_SE)["ENSG00000113327", ]
 )
 
-mean(abs(obs-0.5)<abs(perms-0.5))
+
+toPlot <- data.frame(
+    GABRG2 = gene.exp, Response = c(GSE14613_SE$response, GSE14615_SE$response),
+    dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    check.names = FALSE
+)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
+
+ggplot(toPlot, aes(x = GABRG2, fill = dataset)) +
+    geom_density()
+
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+
+pdf("figures/GSE14613_GABRG2_Boxplot.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+dev.off()
+```
+The batch effect seems too strong here to make this a meaningful comparison. 
+
+## Checking expression of "housekeeping gene" GAPDH (ENSG00000111640)
 
 
+```{r}
+gene.exp <- c(
+    assay(GSE14613_SE)["ENSG00000111640", ],
+    assay(GSE14615_SE)["ENSG00000111640", ]
+)
+
+
+toPlot <- data.frame(
+    GAPDH = gene.exp, 
+    dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    check.names = FALSE
+)
+
+ggplot(toPlot, aes(x = GAPDH, fill = dataset)) +
+    geom_density()
 ```
 
-There seems to be no association among the TCGA patients with PFS, although the definitions of PFS are very different between these datasets. 
+
+
+## Checking expression of "housekeeping gene" ATXN2 (ENSG00000204842)
+
+
+```{r}
+gene.exp <- c(
+    assay(GSE14613_SE)["ENSG00000204842", ],
+    assay(GSE14615_SE)["ENSG00000204842", ]
+)
+
+
+toPlot <- data.frame(
+    ATXN2 = gene.exp, 
+    dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    check.names = FALSE
+)
+
+ggplot(toPlot, aes(x = ATXN2, fill = dataset)) +
+    geom_density()
+```
+
+
+## Lets look at a PCA on common genes:
 
 
 
 ```{r}
 
-library(survcomp)
-library(survminer)
-library(ggplot2)
+library(GGally)
 
+common.genes <- intersect(rownames(GSE14613_SE), rownames(GSE14615_SE))
 
-png("figures/mad2l2_pfs_km_TCGA.png", res = 600, height = 5, width = 5, units = "in")
-surv.data <- data.frame(Days=as.numeric(LUAD.pfs.time)[surv.order], event=LUAD.pfs.event[surv.order], 
-                        MAD2L2=ifelse(MAD2L2.tcga[exp.order]>median(MAD2L2.tcga[exp.order]),"High", "Low"))
-ggsurvplot(survfit(Surv(Days, event=event)~MAD2L2, surv.data), pval=F)
-dev.off()
+gene.exp <- cbind(
+    assay(GSE14613_SE)[common.genes, ],
+    assay(GSE14615_SE)[common.genes, ]
+)
 
+pca <- prcomp(x=t(gene.exp))
+
+ggpairs(as.data.frame(pca$x[, 1:5]), aes(color = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE)))))
 
 ```
 
 
+# Batch effect corrected analysis together 
+Looks like we have a signficant batch effect in this data. Lets try our analysis again with combat applied. 
+
+
+```{r}
+library(sva)
+
+
+phData <- data.frame(
+    Dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    Response = c(GSE14613_SE$response, GSE14615_SE$response),
+    check.names = FALSE
+)
+
+combat.gene.exp <- ComBat(gene.exp, batch = phData$Dataset, mod=model.matrix(~Response, data=phData))
+
+
+pca.combat <- prcomp(x = t(combat.gene.exp))
+
+ggpairs(as.data.frame(pca.combat$x[, 1:5]), aes(color = phData$Dataset))
+
+
+```
+
+Unsurprisingly, ComBat obliterates the batch effects. 
+
+
+
+## Checking expression of "housekeeping gene" GAPDH (ENSG00000111640)
+
+
+```{r}
+gene.exp <- c(
+    combat.gene.exp["ENSG00000111640", ],
+    combat.gene.exp["ENSG00000111640", ]
+)
+
+
+toPlot <- data.frame(
+    GAPDH = gene.exp, 
+    dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    check.names = FALSE
+)
+
+ggplot(toPlot, aes(x = GAPDH, fill = dataset)) +
+    geom_density()
+```
+
+
+## Checking expression of "housekeeping gene" ATXN2 (ENSG00000204842)
+
+
+```{r}
+gene.exp <- c(
+    combat.gene.exp["ENSG00000204842", ],
+    combat.gene.exp["ENSG00000204842", ]
+)
+
+
+toPlot <- data.frame(
+    ATXN2 = gene.exp, 
+    dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    check.names = FALSE
+)
+
+ggplot(toPlot, aes(x = ATXN2, fill = dataset)) +
+    geom_density()
+```
+
+## Combined biomarker analysis. 
+
+```{r}
+
+sapply(genesToCorrelate, function(gene){
+
+    toTest <- data.frame(gene = combat.gene.exp[gene,], 
+                      response = c(GSE14613_SE$response, GSE14615_SE$response))
+    
+    kruskal.test(gene~response, toTest)
+})
+
+
+```
+
+```{r}
+gene.exp <- c(combat.gene.exp["ENSG00000174851", ], 
+              combat.gene.exp["ENSG00000174851", ])
+
+toPlot <- data.frame(YIF1A = gene.exp, Response = c(GSE14613_SE$response, GSE14615_SE$response), 
+                     dataset = c(rep("GSE14613", times=ncol(GSE14613_SE)),rep("GSE14615", times=ncol(GSE14615_SE))),
+                     check.names = FALSE)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
+
+ggplot(toPlot, aes(x = YIF1A, fill = dataset)) +
+     geom_density()
+
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
+
+pdf("figures/Winters_Combined_YIF1A_Boxplot_COMBAT.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, YIF1A)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("YIF1A Expression")
+dev.off()
+```
+
+The batch effect seems too strong here to make this a meaningful comparison. 
+
+
+```{r}
+gene.exp <- c(
+    combat.gene.exp["ENSG00000113327", ],
+    combat.gene.exp["ENSG00000113327", ]
+)
+
+
+toPlot <- data.frame(
+    GABRG2 = gene.exp, Response = c(GSE14613_SE$response, GSE14615_SE$response),
+    dataset = c(rep("GSE14613", times = ncol(GSE14613_SE)), rep("GSE14615", times = ncol(GSE14615_SE))),
+    check.names = FALSE
+)
+toPlot$Response <- str_to_title(trimws(gsub(".+\\=", "", toPlot$Response)))
+toPlot$Response <- factor(toPlot$Response)
+levels(toPlot$Response) <- c("Complete Continous\nRemission", "Failure\n(Relapse)", "No Response\n(Induction Failure)")
+
+ggplot(toPlot, aes(x = GABRG2, fill = dataset)) +
+    geom_density()
+
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill = "lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+
+pdf("figures/Winters_Combined_GABRG2_Boxplott_COMBAT.pdf", width = 4, height = 4)
+ggplot(toPlot, aes(Response, GABRG2)) +
+    geom_boxplot(fill="lightgray") +
+    theme_bw() + ylab("GABRG2 Expression")
+dev.off()
+```
+
+# Distribution of diseases in vitro
+
+```{r}
+
+GDSC1 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GDSC1.rds"))
+GDSC2 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/GDSC2.rds"))
+CCLE.CTRPv2 <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.CTRPv2.rds"))
+gCSI <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/gCSI.rds"))
+CCLE <- updateObject(readRDS("~/Data/TBPInputs/archive_2022_04_08/rna/CCLE.rds"))
+
+
+pset.list <- list(GDSC1, GDSC2, tCCLE, CCLE.CTRPv2, gCSI)
+names(pset.list) <- sapply(pset.list, name)
+
+```
+
+
+```{r}
+disease.tables <- lapply(pset.list, \(pset){
+
+    table(cellInfo(pset)$Cellosaurus.Disease[cellInfo(pset)$tissueid=="Lymphoid"])
+
+})
+
+all.disease <- .unionList(lapply(disease.tables, names))
+
+disease.cell.count <- matrix(NA_integer_, nrow=length(all.disease), ncol=length(pset.list), dimnames=list(all.disease, names(pset.list)))
+
+for(psetn in names(pset.list)){
+
+    disease.cell.count[names(disease.tables[[psetn]]), psetn] <- as.numeric(disease.tables[[psetn]])
+
+}
+
+write.csv(disease.cell.count)
+```
+
+
+# SessionInfo
+
+```{r}
+
+sessionInfo()
+
+```

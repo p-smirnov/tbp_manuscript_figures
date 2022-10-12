@@ -1,0 +1,213 @@
+---
+title: "Breast Validation of Lapatinib markers."
+output:
+  html_document:
+    df_print: paged
+---
+
+# Lapatinib + Breast
+
+Just one public dataset here, but I can check several biomarkers. 
+
+```{r}
+
+
+library(PharmacoGx)
+library(readxl)
+library(ggplot2)
+library(qs)
+library(PRROC)
+
+
+library(data.table)
+
+
+
+biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+biomarker_res <- biomarker_res[FWER_genes <= 0.05]
+
+biomarker_res[Tissue == "Breast" & Drug == "Lapatinib"]
+
+genesToCorrelate <- biomarker_res[Tissue == "Breast" & Drug == "Lapatinib", Gene]
+
+
+```
+
+
+Lets load in the dataset and start by examining the two arms separately.
+```{r}
+GSE66305_SE <- qread("~/Data/Clinical Trial SE/GSE66305_SE.qs")
+
+
+```
+
+Note that one of the biomarkers is not on the array:
+
+```{r}
+setdiff(genesToCorrelate, rownames(GSE66305_SE))
+genesToCorrelate <- intersect(genesToCorrelate, rownames(GSE66305_SE))
+```
+
+## chemo+lapatinib arm.
+
+```{r}
+GSE66305_SE <- qread("~/Data/Clinical Trial SE/GSE66305_SE.qs")
+
+GSE66305_SE_lapatinib_only <- GSE66305_SE[,"chemotherapy+lapatinib"==GSE66305_SE$treatment]
+
+```
+
+```{r}
+
+data.frame(sapply(genesToCorrelate, function(gene){
+
+    gene.exp <- assay(GSE66305_SE_lapatinib_only)[gene, ]
+
+    wilcox.test(
+        split(gene.exp, f = GSE66305_SE_lapatinib_only$response)[[1]],
+        split(gene.exp, f = GSE66305_SE_lapatinib_only$response)[[2]]
+    )$p.value
+}))
+
+
+```
+
+
+## chemo+lapatinib+herceptin arm.
+
+```{r}
+GSE66305_SE <- qread("~/Data/Clinical Trial SE/GSE66305_SE.qs")
+
+GSE66305_SE_combo <- GSE66305_SE[, "chemotherapy+trastuzumab+lapatinib" == GSE66305_SE$treatment]
+
+```
+
+```{r}
+
+data.frame(sapply(genesToCorrelate, function(gene){
+
+    gene.exp <- assay(GSE66305_SE_combo)[gene, ]
+
+    wilcox.test(
+        split(gene.exp, f = GSE66305_SE_combo$response)[[1]],
+        split(gene.exp, f = GSE66305_SE_combo$response)[[2]]
+    )$p.value
+}))
+
+
+```
+
+
+# AD filter
+
+Now Lets check what this looks like if we pre-filter using the AD filter
+
+
+```{r}
+
+# load("~/Data/Task1 Filter/results_01112022/AD/ad.cancer.type.ccle.RData")
+load("~/Code/tissue_biomarker/farnoosh_ks_res/results/ad.res.scale.RData")
+ad.res <- data.table(ad.res)
+
+
+genesToCorrelate <- intersect(ad.res[cancer == "breast" & padj.BH > 0.1, gene], genesToCorrelate)
+
+
+```
+
+Looking at the chemo+lapatinib arm.
+
+```{r}
+GSE66305_SE <- qread("~/Data/Clinical Trial SE/GSE66305_SE.qs")
+
+GSE66305_SE_lapatinib_only <- GSE66305_SE[,"chemotherapy+lapatinib"==GSE66305_SE$treatment]
+
+```
+
+
+```{r}
+
+sapply(genesToCorrelate, function(gene){
+    gene.exp <- assay(GSE66305_SE_lapatinib_only)[gene, ]
+
+    wilcox.test(
+        split(gene.exp, f = GSE66305_SE_lapatinib_only$response)[[1]],
+        split(gene.exp, f = GSE66305_SE_lapatinib_only$response)[[2]]
+    )$p.value
+})
+
+
+```
+
+With the filter, ENSG00000141738 (GRB7) protein expression is significant. 
+
+
+```{r}
+GSE66305_SE_lapatinib <- GSE66305_SE[, grepl("lapatinib",x=GSE66305_SE$treatment)]
+
+
+
+gene.exp <- assay(GSE66305_SE_lapatinib)["ENSG00000141738", ]
+
+toPlot <- data.frame(GRB7 = gene.exp, Response = GSE66305_SE_lapatinib$response, 
+                     `Treatment Arm` = GSE66305_SE_lapatinib$treatment, 
+                     check.names = FALSE)
+
+toPlot[, "Treatment Arm"] <- ifelse(toPlot[, "Treatment Arm"] == "chemotherapy+lapatinib", 
+                                    "Chemo + Lapatinib",
+                                    "Chemo + Lapatinib + Trastuzumab")
+
+ggplot(toPlot, aes(Response, GRB7)) +
+    geom_boxplot(fill = "lightgray") +
+    facet_grid(. ~ `Treatment Arm`) +
+    theme_bw() + ylab("GRB7 Expression")
+
+pdf("figures/GSE66305_GRB7_StartByTreatment.pdf", width = 7, height = 5)
+ggplot(toPlot, aes(Response, GRB7)) +
+    geom_boxplot(fill="lightgray") +
+    facet_grid(. ~ `Treatment Arm`) +
+    theme_bw() + ylab("GRB7 Expression")
+dev.off()
+
+```
+
+Lets plot the ROC and PR curves within the Chemo+Lap arm
+
+```{r}
+
+gene.exp <- assay(GSE66305_SE_lapatinib_only)["ENSG00000141738", ]
+status <- GSE66305_SE_lapatinib_only$response
+
+plot(roc.curve(gene.exp, weights.class0 = status == "pCR", curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("ROC Curve\nAUC = ", format(roc.curve(gene.exp, weights.class0 = status == "pCR", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+
+
+pdf("figures/GSE66305_GRB7_ROC.pdf", width = 5, height = 5)
+plot(roc.curve(gene.exp, weights.class0 = status == "pCR", curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("ROC Curve\nAUC = ", format(roc.curve(gene.exp, weights.class0 = status == "pCR", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+dev.off()
+
+plot(pr.curve(gene.exp, weights.class0 = status == "pCR", curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("PR Curve\nAUC = ", format(pr.curve(gene.exp, weights.class0 = status == "pCR", curve = T)$auc.integral, digits = 2))
+)
+lines(seq(0, 1, 0.01), rep(mean(status=="pCR"), times = length(seq(0, 1, 0.01))))
+
+
+pdf("figures/GSE66305_GRB7_PR.pdf", width = 5, height = 5)
+plot(pr.curve(gene.exp, weights.class0 = status == "pCR", curve = T),
+    color = FALSE, auc.main = FALSE,
+    main = paste0("PR Curve\nAUC = ", format(pr.curve(gene.exp, weights.class0 = status == "pCR", curve = T)$auc.integral, digits = 2))
+)
+lines(seq(0, 1, 0.01), rep(mean(status == "pCR"), times = length(seq(0, 1, 0.01))))
+dev.off()
+
+```

@@ -1,0 +1,233 @@
+---
+title: "Validation of Lung Markers for Erlotinib."
+output:
+  html_document:
+    df_print: paged
+  html_notebook: default
+---
+
+# Lung + Erlotinib
+
+This should be fairly simple, there is 1 dataset.
+
+
+
+```{r}
+
+
+library(PharmacoGx)
+library(survcomp)
+library(survminer)
+library(readxl)
+library(ggplot2)
+library(qs)
+
+library(data.table)
+
+
+biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res//mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+biomarker_res <- biomarker_res[FWER_genes <= 0.05]
+
+
+
+geneToCorrelate <- biomarker_res[Tissue=="Lung"&Drug=="Erlotinib", Gene]
+
+
+
+battle1.se <- qread("~/Code/univariate_rna_validation/data/Clinical Trial SE/GSE33072_SE.qs")
+
+battle1.erlotinib <- battle1.se[,battle1.se$treatment %in% "erlotinib"] #note, missing 1 patient on "erlotinib+bexarotene"
+
+
+summary(as.numeric(battle1.erlotinib$survival_time))
+battle1.erlotinib$event_occured <- ifelse(battle1.erlotinib$progression.free.survival.status.ch1 %in% 1, 1, 0)
+
+
+```
+
+
+
+In this case, we have multiple markers to look at, and not too many patients. Therefore, we will apply the filters from Task 1 to narrow down the search space to only those that aren't rejected as "too different" between cell lines and patients. 
+
+Lets check all the markers in a loop:
+
+
+Now we can check the correlation with survival using the concordance index. Unfortunately, there are no labels for "response" in the erlotinib cohort. 
+
+The way the following code is designed, we use the sign of the estimate from the cell line analysis to make higher c-index correspond to predictions in the same direction as cell lines. 
+
+Note that the p values from surv.comp are known to be anti-conservative, so we confirm with a permutation test. 
+
+
+```{r}
+library(parallel)
+cl=makeCluster(24)
+
+clusterExport(cl=cl, c("biomarker_res", "battle1.erlotinib"))
+
+permutation.res <- parallel::parSapply(cl=cl, geneToCorrelate, \(gene) {
+  # gene <- "ENSG00000116670"
+  gene.exp <- SummarizedExperiment::assay(battle1.erlotinib)[gene, ]
+
+## Using Hmisc because it is much faster
+  obs <- Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * gene.exp, 
+                           survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
+
+  perms <- sapply(1:100000, function(i) {
+  Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * sample(gene.exp),
+                    survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
+})
+
+  p.val <- mean(abs(obs - 0.5) < abs(perms - 0.5))
+  return(c("CI" = obs, p.value = p.val))
+})
+
+stopCluster(cl)
+
+permutation.res
+
+```
+
+
+```{r}
+
+
+
+
+# load("~/Data/Task1 Filter/results_01112022/AD/ad.cancer.type.ccle.RData")
+load("~/Code/tissue_biomarker/farnoosh_ks_res/results/ad.res.scale.RData")
+ad.res <- data.table(ad.res)
+
+ad.res[,mean(padj.BH<.1), cancer]
+
+
+# merged.biomarker.res <- merge(biomarker_res, ad.res, by.x=c("Gene", "Tissue"), by.y=c("gene", "lineage"))
+# # merged.biomarker.res[Gene %in% names(concordance.index.res[sapply(concordance.index.res, function(x) return(x$p.value < 0.001))])&Drug=="Erlotinib"]
+# geneToCorrelate <- merged.biomarker.res[Gene %in% geneToCorrelate&Drug=="Erlotinib"&padj.BH>0.1, Gene]
+
+geneToCorrelate <- intersect(ad.res[cancer == "lung" & padj.BH > 0.1, gene], geneToCorrelate)
+
+
+```
+
+
+We can check if applying this filter would allow us to detect a significant effect. 
+
+
+```{r}
+library(parallel)
+cl=makeCluster(24)
+
+clusterExport(cl=cl, c("biomarker_res", "battle1.erlotinib"))
+
+permutation.res <- parallel::parSapply(cl=cl, geneToCorrelate, \(gene) {
+  # gene <- "ENSG00000116670"
+  gene.exp <- SummarizedExperiment::assay(battle1.erlotinib)[gene, ]
+
+## Using Hmisc because it is much faster
+  obs <- Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * gene.exp, 
+                           survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
+
+  perms <- sapply(1:100000, function(i) {
+  Hmisc::rcorr.cens(sign(biomarker_res[Tissue == "Lung" & Drug == "Erlotinib" & Gene == gene, estimate]) * sample(gene.exp),
+                    survival::Surv(as.numeric(battle1.erlotinib$survival_time), battle1.erlotinib$event_occured))[[1]]
+})
+
+  p.val <- mean(abs(obs - 0.5) < abs(perms - 0.5))
+  return(c("CI" = obs, p.value = p.val))
+})
+
+stopCluster(cl)
+
+permutation.res
+```
+
+
+For plotting purposes, we will look at a Kaplan Meier, however it is not a significant marker when you binarize using the median. 
+
+```{r}
+
+library(survcomp)
+library(survminer)
+library(ggplot2)
+
+
+png("figures/mad2l2_pfs_km.png", res=600, height = 5, width=5, units="in")
+surv.data <- data.frame(time=as.numeric(battle1.erlotinib$survival_time), event=battle1.erlotinib$event_occured, MAD2L2=ifelse(assay(battle1.erlotinib)["ENSG00000116670",]>median(assay(battle1.erlotinib)["ENSG00000116670",]),"High", "Low"))
+ggsurvplot(survfit(Surv(time, event=event)~MAD2L2, surv.data), pval=F)
+dev.off()
+
+
+```
+
+
+# Checking prognosis and healthy vs disease tissue
+
+```{r}
+library(UCSCXenaTools)
+XenaGenerate(subset = XenaHostNames=="tcgaHub") %>% 
+  XenaFilter(filterDatasets = "clinical|HiSeqV2$") %>% 
+  XenaFilter(filterDatasets = "LUAD") -> df_todo
+
+XenaQuery(df_todo) %>% XenaDownload() %>% XenaPrepare() -> LUAD
+
+
+
+```
+
+```{r}
+
+MAD2L2.tcga <- unlist(LUAD$HiSeqV2.gz[LUAD$HiSeqV2.gz$sample=="MAD2L2",-1])
+
+hist(MAD2L2.tcga)
+
+
+```
+
+
+```{r}
+
+LUAD.pfs.event <- !is.na(LUAD$LUAD_clinicalMatrix$days_to_new_tumor_event_after_initial_treatment)
+
+LUAD.pfs.time <- ifelse(LUAD.pfs.event, LUAD$LUAD_clinicalMatrix$days_to_new_tumor_event_after_initial_treatment, LUAD$LUAD_clinicalMatrix$days_to_last_followup)
+
+common.patients <- intersect(LUAD$LUAD_clinicalMatrix$sampleID, names(MAD2L2.tcga))
+
+surv.order <- match(common.patients, LUAD$LUAD_clinicalMatrix$sampleID)
+
+exp.order <- match(common.patients, names(MAD2L2.tcga))
+
+## Using Hmisc because it is much faster
+obs <- Hmisc::rcorr.cens(MAD2L2.tcga[exp.order],Surv(as.numeric(LUAD.pfs.time)[surv.order], LUAD.pfs.event[surv.order]))[[1]]
+
+perms <- sapply(1:1000, function(i) 
+Hmisc::rcorr.cens(MAD2L2.tcga[sample(exp.order)],Surv(as.numeric(LUAD.pfs.time)[surv.order], LUAD.pfs.event[surv.order]))[[1]]
+)
+
+mean(abs(obs-0.5)<abs(perms-0.5))
+
+
+```
+
+There seems to be no association among the TCGA patients with PFS, although the definitions of PFS are very different between these datasets. 
+
+
+
+```{r}
+
+library(survcomp)
+library(survminer)
+library(ggplot2)
+
+
+png("figures/mad2l2_pfs_km_TCGA.png", res = 600, height = 5, width = 5, units = "in")
+surv.data <- data.frame(Days=as.numeric(LUAD.pfs.time)[surv.order], event=LUAD.pfs.event[surv.order], 
+                        MAD2L2=ifelse(MAD2L2.tcga[exp.order]>median(MAD2L2.tcga[exp.order]),"High", "Low"))
+ggsurvplot(survfit(Surv(Days, event=event)~MAD2L2, surv.data), pval=F)
+dev.off()
+
+
+```
+
+

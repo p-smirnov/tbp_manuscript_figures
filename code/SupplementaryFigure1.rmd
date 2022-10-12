@@ -39,11 +39,11 @@ Plotting distributions of drug response
 
 ```{r}
 png("figures/lapdist.png", height = 5, width = 5, units = "in", res = 600)
-hist(aac["Lapatinib",], breaks=20, xlab="AAC")
+hist(aac["Lapatinib", ], breaks = 20, xlab = "AAC", main = "")
 dev.off()
 
 png("figures/pacdist.png", height = 5, width = 5, units = "in", res = 600)
-hist(aac["Paclitaxel", ], breaks = 20, xlab = "AAC")
+hist(aac["Paclitaxel", ], breaks = 20, xlab = "AAC", main = "")
 dev.off()
 
 ```
