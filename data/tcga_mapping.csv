@@ -1,0 +1,30 @@
+Cancer,Standardized Tissue
+NA,
+Adrenocortical carcinoma (ACC),Adrenal Gland
+Bladder Urothelial Carcinoma (BLCA),Bladder/Urinary Tract
+Breast invasive carcinoma (BRCA),Breast
+Cervical squamous cell carcinoma and endocervical adenocarcinoma (CESC),Cervix
+Colon adenocarcinoma (COAD),Bowel
+Esophageal carcinoma (ESCA),Esophagus/Stomach
+Glioblastoma multiforme (GBM),CNS/Brain
+Head and Neck squamous cell carcinoma (HNSC),Head and Neck
+Kidney Chromophobe (KICH),Kidney
+Kidney renal clear cell carcinoma (KIRC),Kidney
+Kidney renal papillary cell carcinoma (KIRP),Kidney
+Brain Lower Grade Glioma (LGG),CNS/Brain
+Liver hepatocellular carcinoma (LIHC),Liver
+Lung adenocarcinoma (LUAD),Lung
+Lung squamous cell carcinoma (LUSC),Lung
+Mesothelioma (MESO),Other
+Ovarian serous cystadenocarcinoma (OV),Ovary/Fallopian Tube
+Pancreatic adenocarcinoma (PAAD),Pancreas
+Pheochromocytoma and Paraganglioma (PCPG),Other
+Prostate adenocarcinoma (PRAD),Prostate
+Rectum adenocarcinoma (READ),Bowel
+Sarcoma (SARC),Other
+Skin Cutaneous Melanoma (SKCM),Skin
+Stomach adenocarcinoma (STAD),Esophagus/Stomach
+Testicular Germ Cell Tumors (TGCT),Testis
+Thyroid carcinoma (THCA),Thyroid
+Uterine Corpus Endometrial Carcinoma (UCEC),Uterus
+Uterine Carcinosarcoma (UCS),Uterus

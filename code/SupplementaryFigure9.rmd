@@ -77,8 +77,8 @@ dev.off()
 Total Number of Triplets investigated
 ```{r}
 library(data.table)
-toRunAll <- fread("~/Code/tissue_biomarker/rnaResults/runlist_files/geneExpressionMasterToRunList.txt", header=F)
-metaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+toRunAll <- fread("~/Code/tissue_biomarker/rnaResultsPrism/runlist_files/geneExpressionMasterToRunList.txt", header=F)
+metaRes <- fread("~/Code/tissue_biomarker/rnaResultsPrism/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
 
 toRunAll[,.N]
 
@@ -255,6 +255,82 @@ dev.off()
 #         legend.position = "none",
 #         plot.title = element_text(hjust = .5)
 #     )
+
+
+```
+
+# what about tcga
+
+
+
+
+```{r}
+library(readxl)
+tcga_drug_annot <- data.table(data.frame(read_excel("~/Code/tissue_biomarker/rnaValidation/clinicalValidation/bioinfo16_supplementary_tables.xlsx", sheet = 3, skip=1)))
+tcga_drug_annot[,unique(Cancer)]
+
+tcga.mapping <-fread("~/Code/Github/tbp_manuscript_figures/data/tcga_mapping.csv")
+
+tcga_drug_annot <- merge(tcga_drug_annot, tcga.mapping)
+
+
+
+```
+
+
+Intersecting with all possible biomarkers 
+
+
+```{r}
+
+toRunTissueDrug <- unique(toRunAll[, .(V2, V3)])
+colnames(tissueDrugClinLong) <- c("Drug", "Tissue")
+
+tcga_drug_tissue <- unique(tcga_drug_annot[, c("drug_name", "Standardized Tissue")])
+colnames(tcga_drug_tissue) <- c("Drug","Tissue")
+
+merge(tcga_drug_tissue, tissueDrugClinLong, by = c("Drug", "Tissue"))[, .N]
+
+```
+
+
+Intersecting with dataset specific markers
+
+
+```{r}
+merge(unique(metaRes[, .(Tissue, Drug)]), tcga_drug_tissue, by = c("Drug", "Tissue"))[, .N]
+
+```
+
+
+Intersecting with meta-analysis markers
+
+
+```{r}
+merge(unique(metaRes[FWER_genes <= 0.05, .(Tissue, Drug)]), tcga_drug_tissue, by = c("Drug", "Tissue"))
+
+```
+
+
+```{r}
+merge(tcga_drug_annot, unique(metaRes[FWER_genes <= 0.05, .(Tissue, Drug)]), by.x = c("drug_name", "Standardized Tissue"), by.y = c("Drug", "Tissue"))[, .N]
+
+```
+
+
+## compare old vs new
+
+
+```{r}
+oldmetaRes <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+mergedRes <- merge(oldmetaRes,metaRes,all.x=T,all.y=T,by=c("Gene","Drug","Tissue"))
+
+mergedRes[!FWER_genes.x <= 0.05 & FWER_genes.y <= 0.05]
+
+mergedRes[!FWER_genes.x <= 0.05 & FWER_genes.y <= 0.05][,.N,.(Drug,Tissue)]
+
+mergedRes[!FWER_genes.y <= 0.05 & FWER_genes.x <= 0.05][, .N, .(Drug, Tissue)]
 
 
 ```

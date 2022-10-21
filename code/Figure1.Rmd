@@ -15,9 +15,9 @@ library(scales)
 library(data.table)
 
 
-biomarker.res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res/meta_res_pharmacodb.csv")
+biomarker.res <- fread("~/Code/tissue_biomarker/rnaResultsPrism/biomarker_res/meta_res_pharmacodb.csv")
 
-toRunByGene <- fread("~/Code/tissue_biomarker/rnaResults/runlist_files/toRunMetaByGene.txt")
+toRunByGene <- fread("~/Code/tissue_biomarker/rnaResultsPrism/runlist_files/toRunMetaByGene.txt")
 
 colnames(toRunByGene) <- c("Gene", "Tissue", "Drug", "PSet", "Sig")
 
