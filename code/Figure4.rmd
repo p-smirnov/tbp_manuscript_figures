@@ -380,6 +380,42 @@ dev.off()
 ```
 
 
+```{r}
+
+EIF5A_25066 <- assay(GSE25066)["ENSG00000132507", ]
+
+
+pCR_split <- split(EIF5A_25066, GSE25066$response)
+
+pdf("figures/Hatzis_EIF5A_expression_boxplot.pdf")
+boxplot(pCR_split)
+dev.off()
+
+
+
+wilcox.test(pCR_split[[1]], pCR_split[[2]])
+
+
+my.x <- !is.na(GSE25066$response)
+
+
+png("figures/Hatzis_EIF5A_ROC.png", width = 5, height = 5, units = "in", res = 600)
+plot(roc.curve(EIF5A_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("ROC Curve\nAUC = ", format(roc.curve(EIF5A_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T)$auc, digits=2)))
+lines(seq(0,1,0.01), seq(0,1,0.01))
+dev.off()
+
+png("figures/Hatzis_EIF5A_PR.png", width = 5, height = 5, units = "in", res = 600)
+plot(pr.curve(EIF5A_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T), color=FALSE, 	auc.main=FALSE,
+	main=paste0("PR Curve\nAUC = ", format(pr.curve(EIF5A_25066[my.x], weights.class0=GSE25066$response[my.x]=="pCR", curve=T)$auc.integral, digits=2)))
+lines(seq(0,1,0.01), rep(sum(GSE25066$response=="pCR", na.rm=T)/sum(!is.na(GSE25066$response)), length(seq(0,1,0.01))))
+dev.off()
+
+```
+
+
+
+
 ## TNBC
 
 Lets check how this marker behaves with TNBC status in this dataset

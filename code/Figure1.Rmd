@@ -15,7 +15,7 @@ library(scales)
 library(data.table)
 
 
-biomarker.res <- fread("~/Code/tissue_biomarker/rnaResultsPrism/biomarker_res/meta_res_pharmacodb.csv")
+biomarker.res <- fread("~/Code/tissue_biomarker/rnaResultsPrism/biomarker_res/mrna_gene_drug_tissue_res_pharmacodb.csv")
 
 toRunByGene <- fread("~/Code/tissue_biomarker/rnaResultsPrism/runlist_files/toRunMetaByGene.txt")
 
@@ -39,7 +39,7 @@ I am treating any failure to validate in meta-analysis of a biomarker discovered
 library(ggplot2)
 test <- toRunByGene[biomarker.res,,on=.(Drug, Gene, Tissue)]
 
-toPlot <- test[Sig%in%0, as.list(prop.table(table(BF_p_all<0.05))), PSet]
+toPlot <- test[Sig%in%0, as.list(prop.table(table(FWER_genes<0.05))), PSet]
 
 ggplot(toPlot, aes(`FALSE`, PSet)) + geom_col() + theme_classic() + xlab("False Discovery Rate") + ylab("Study") + xlim(c(0,1))
 
@@ -56,7 +56,7 @@ dev.off()
 
 ```{r}
 
-toPlot <- biomarker.res[BF_p_all<=0.05, .N, .(Drug, Tissue)][order(N)]
+toPlot <- biomarker.res[FWER_genes<=0.05, .N, .(Drug, Tissue)][order(N)]
 
 sortOrder <- unique(toPlot[,sum(N),Drug][order(V1)][,Drug])
 
@@ -67,7 +67,7 @@ toPlot$Tissue <- factor(toPlot$Tissue, levels=c("Skin",
                                                 "Lung", 
                                                 "Ovary/Fallopian Tube",
                                                 "Bowel", "Lymphoid",
-                                                "Breast"))
+                                                "Breast", "Pancreas", "Myeloid"))
 
 pdf(file = "figures/BiomarkerPerDrugDist.pdf", width=7, height = 5)
 ggplot(toPlot, aes(x=Drug, y=N, fill=Tissue)) + geom_bar(stat="identity")+ 
@@ -102,6 +102,8 @@ drug.annot <- fread("~/Code/Github/pachyderm/Annotations/drugs_with_ids.csv")
 
 
 ```{r}
+## TODO:: complete the drug indication table!
+
 library(data.table)
 drugIndications <- fread("~/Code/tissue_biomarker/drugInfo/drugIndications.csv", header = FALSE)
 colnames(drugIndications) <- c("Drug", "Tissue")
