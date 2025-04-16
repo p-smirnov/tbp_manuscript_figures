@@ -1,0 +1,129 @@
+---
+title: "Figure 4, and related supplemental: Validating Breast Cancer Paclitaxel associations"
+output:
+  html_document:
+    df_print: paged
+---
+
+# Patient Data
+
+
+```{r}
+
+
+library(PharmacoGx)
+library(PRROC)
+
+library(data.table)
+
+
+library(survcomp)
+library(survminer)
+library(readxl)
+library(ggplot2)
+library(SummarizedExperiment)
+library(readxl)
+library(MultiAssayExperiment)
+
+library(qs)
+
+
+biomarker_res <- fread("~/Code/tissue_biomarker/rnaResults/biomarker_res//mrna_gene_drug_tissue_res_pharmacodb.csv")
+
+biomarker_res <- biomarker_res[FWER_genes <= 0.05]
+
+```
+
+## ISPY cohort
+
+```{r}
+
+ispy <- readRDS("~/Data/Clinical Trial SE/ICB_Wolf.rds")[['expr']]
+
+odc1_ispy <- unlist(assay(ispy)["ENSG00000115758.8",])
+
+hist(odc1_ispy)
+
+```
+
+
+Lets look at Taxol only first:
+
+```{r}
+ispy_taxol_only <- ispy[,ispy$treatmentid == "Paclitaxel"]
+odc1_taxol_only <- unlist(assay(ispy_taxol_only)["ENSG00000115758.8", ])
+
+boxplot(odc1_taxol_only[ispy_taxol_only$response == "R"], odc1_taxol_only[ispy_taxol_only$response == "NR"])
+wilcox.test(odc1_taxol_only[ispy_taxol_only$response == "R"], odc1_taxol_only[ispy_taxol_only$response == "NR"])
+
+
+plot(roc.curve(odc1_taxol_only, weights.class0 = ispy_taxol_only$response == "R", curve = T),
+  color = FALSE, auc.main = FALSE,
+  main = paste0("ROC Curve\nAUC = ", format(roc.curve(odc1_taxol_only, weights.class0 = ispy_taxol_only$response == "R", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+
+```
+
+
+
+And now all the patients with any taxol
+
+
+```{r}
+ispy_taxol <- ispy[, grepl("Paclitaxel", x=ispy$treatmentid)]
+odc1_taxol <- unlist(assay(ispy_taxol)["ENSG00000115758.8", ])
+
+
+boxplot(odc1_taxol[ispy_taxol$response == "R"], odc1_taxol[ispy_taxol$response == "NR"])
+wilcox.test(odc1_taxol[ispy_taxol$response == "R"], odc1_taxol[ispy_taxol$response == "NR"])
+
+
+plot(roc.curve(odc1_taxol, weights.class0 = ispy_taxol$response == "R", curve = T),
+  color = FALSE, auc.main = FALSE,
+  main = paste0("ROC Curve\nAUC = ", format(roc.curve(odc1_taxol, weights.class0 = ispy_taxol$response == "R", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+```
+
+
+What about TNBC?
+
+```{r}
+table(ispy_taxol$Receptor.Subtype, ispy_taxol$response)
+
+ispy_taxol_tnbc <- ispy_taxol[, ispy_taxol$Receptor.Subtype == "TN"]
+odc1_taxol_tnbc <- unlist(assay(ispy_taxol_tnbc)["ENSG00000115758.8", ])
+
+boxplot(odc1_taxol_tnbc[ispy_taxol_tnbc$response == "R"], odc1_taxol_tnbc[ispy_taxol_tnbc$response == "NR"])
+wilcox.test(odc1_taxol_tnbc[ispy_taxol_tnbc$response == "R"], odc1_taxol_tnbc[ispy_taxol_tnbc$response == "NR"])
+
+
+plot(roc.curve(odc1_taxol_tnbc, weights.class0 = ispy_taxol_tnbc$response == "R", curve = T),
+  color = FALSE, auc.main = FALSE,
+  main = paste0("ROC Curve\nAUC = ", format(roc.curve(odc1_taxol_tnbc, weights.class0 = ispy_taxol_tnbc$response == "R", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+```
+
+
+```{r}
+table(ispy_taxol$Receptor.Subtype, ispy_taxol$response)
+
+ispy_taxol_ntnbc <- ispy_taxol[, ispy_taxol$Receptor.Subtype != "TN"]
+odc1_taxol_ntnbc <- unlist(assay(ispy_taxol_ntnbc)["ENSG00000115758.8", ])
+
+boxplot(odc1_taxol_ntnbc[ispy_taxol_ntnbc$response == "R"], odc1_taxol_ntnbc[ispy_taxol_ntnbc$response == "NR"])
+wilcox.test(odc1_taxol_ntnbc[ispy_taxol_ntnbc$response == "R"], odc1_taxol_ntnbc[ispy_taxol_ntnbc$response == "NR"])
+
+
+plot(roc.curve(odc1_taxol_ntnbc, weights.class0 = ispy_taxol_ntnbc$response == "R", curve = T),
+  color = FALSE, auc.main = FALSE,
+  main = paste0("ROC Curve\nAUC = ", format(roc.curve(odc1_taxol_ntnbc, weights.class0 = ispy_taxol_ntnbc$response == "R", curve = T)$auc, digits = 2))
+)
+lines(seq(0, 1, 0.01), seq(0, 1, 0.01))
+
+```
